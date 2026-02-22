@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         PekoraTrader
+// @name         PekoraTrader v2
 // @namespace    https://pekora.zip
-// @version      2.3
+// @version      2.4
 // @description  Mass trade tool for pekora.zip with Kolimons integration
 // @author       LMoD
 // @match        https://www.pekora.zip/*
@@ -19,84 +19,144 @@
 (function () {
   'use strict';
 
-  // ─────────────────────────────────────────
-  // STATE
-  // ─────────────────────────────────────────
-  let isRunning = false;
-  let shouldStop = false;
-  let allItems = {};
-  let myInventory = [];
-  let selectedOfferItems = [];
-  let targetItem = null;
-  let owners = [];
-  let consecutiveRateLimits = 0;
+  // ─── STATE ───────────────────────────────
+  let isRunning = false, shouldStop = false;
+  let allItems = {}, myInventory = [], selectedOfferItems = [];
+  let targetItem = null, owners = [], consecutiveRateLimits = 0;
+  let maxUsers = 0, delaySeconds = 5, backoffBase = 15;
 
-  let maxUsers = 0;
-  let delaySeconds = 5;
-  let backoffBase = 15;
+  // Cancel tab
+  let outboundTrades = [], isCancelling = false, shouldStopCancel = false, cancelDelay = 2;
+  let selectedTradeIds = new Set();
 
-  const TRADE_URL = 'https://www.pekora.zip/apisite/trades/v1/trades/send';
-  const INVENTORY_URL = uid => `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?limit=100`;
-  const THEIR_ASSETS_URL = (uid, assetId) => `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?assetId=${assetId}`;
-  const KOLIMONS = 'https://kolimons.xyz/api/ext';
+  // ─── ENDPOINTS ───────────────────────────
+  const TRADE_URL    = 'https://www.pekora.zip/apisite/trades/v1/trades/send';
+  const OUTBOUND_URL = cur => `https://www.pekora.zip/apisite/trades/v1/trades/outbound${cur ? `?cursor=${cur}` : ''}`;
+  const CANCEL_URL   = id  => `https://www.pekora.zip/apisite/trades/v1/trades/${id}/decline`;
+  const KOLIMONS     = 'https://kolimons.xyz/api/ext';
 
-  // ─────────────────────────────────────────
-  // CSS & HTML (OMITTED FOR BREVITY - KEEPS UI EXACTLY THE SAME)
-  // ─────────────────────────────────────────
+  // ─── CSS ─────────────────────────────────
   const style = document.createElement('style');
   style.textContent = `
-    #pt-fab { position: fixed; bottom: 28px; right: 28px; width: 48px; height: 48px; background: #1a73e8; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 999998; box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: none; transition: background 0.2s, transform 0.15s; }
-    #pt-fab:hover { background: #1260cc; transform: scale(1.06); }
-    #pt-fab svg { width: 22px; height: 22px; fill: #fff; }
-    #pt-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 999999; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.18s; }
-    #pt-overlay.open { opacity: 1; pointer-events: all; }
-    #pt-modal { width: 700px; max-width: 96vw; max-height: 88vh; background: #1c1e24; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 80px rgba(0,0,0,0.75); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; color: #c9cdd4; transform: translateY(12px) scale(0.98); transition: transform 0.18s; }
-    #pt-overlay.open #pt-modal { transform: translateY(0) scale(1); }
-    #pt-header { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; background: #15171c; border-bottom: 1px solid #25272e; flex-shrink: 0; }
-    #pt-title { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: #eaecf0; }
-    #pt-title svg { width: 17px; height: 17px; fill: #1a73e8; flex-shrink: 0; }
-    #pt-close { background: none; border: none; color: #555c6b; font-size: 22px; cursor: pointer; line-height: 1; padding: 2px 5px; border-radius: 4px; transition: color 0.15s, background 0.15s; }
-    #pt-close:hover { color: #eaecf0; background: #25272e; }
-    #pt-tabs { display: flex; background: #15171c; border-bottom: 1px solid #25272e; flex-shrink: 0; }
-    .pt-tab { padding: 11px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: #555c6b; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; white-space: nowrap; }
-    .pt-tab:hover { color: #c9cdd4; } .pt-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
-    #pt-body { overflow-y: auto; flex: 1; min-height: 0; } #pt-body::-webkit-scrollbar { width: 5px; } #pt-body::-webkit-scrollbar-thumb { background: #2e3039; border-radius: 3px; }
-    .pt-pane { display: none; padding: 16px 18px; } .pt-pane.active { display: block; }
-    .pt-warn { background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.3); border-radius: 6px; padding: 10px 13px; color: #f87171; font-size: 12px; font-weight: 600; letter-spacing: 0.15px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-    .pt-box { background: #22242b; border: 1px solid #2b2d36; border-radius: 6px; padding: 14px 14px 12px; margin-bottom: 12px; }
-    .pt-box-title { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: #555c6b; margin-bottom: 11px; } .pt-box-title em { color: #1a73e8; font-style: normal; font-weight: 700; }
-    .pt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; transition: background 0.15s, opacity 0.15s; white-space: nowrap; }
-    .pt-btn:disabled { opacity: 0.35; cursor: not-allowed; } .pt-btn-blue { background: #1a73e8; color: #fff; } .pt-btn-blue:hover:not(:disabled) { background: #1260cc; } .pt-btn-green { background: #1a8f4a; color: #fff; } .pt-btn-green:hover:not(:disabled) { background: #177a3f; } .pt-btn-red { background: #c0392b; color: #fff; } .pt-btn-red:hover:not(:disabled) { background: #a93226; } .pt-btn-dark { background: #2b2d36; color: #c9cdd4; border: 1px solid #34363f; } .pt-btn-dark:hover:not(:disabled) { background: #32343e; } .pt-btn-w { width: 100%; }
-    .pt-input { background: #18191f; border: 1px solid #2b2d36; border-radius: 5px; padding: 8px 11px; color: #eaecf0; font-family: inherit; font-size: 13px; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.15s; } .pt-input:focus { border-color: #1a73e8; } .pt-input::placeholder { color: #3e4351; }
-    #pt-inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 7px; max-height: 175px; overflow-y: auto; margin-top: 10px; } #pt-inv-grid::-webkit-scrollbar { width: 4px; } #pt-inv-grid::-webkit-scrollbar-thumb { background: #2b2d36; border-radius: 2px; }
-    .pt-iitem { background: #18191f; border: 2px solid #2b2d36; border-radius: 6px; padding: 6px; cursor: pointer; text-align: center; transition: border-color 0.12s, background 0.12s; } .pt-iitem:hover { border-color: #1a73e8; background: #1c2538; } .pt-iitem.sel { border-color: #1a73e8; background: #1c2538; } .pt-iitem img { width: 100%; aspect-ratio: 1; border-radius: 4px; display: block; margin-bottom: 3px; background: #22242b; object-fit: cover; } .pt-iitem-n { font-size: 9px; color: #7c8494; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pt-iitem-v { font-size: 9px; color: #1a73e8; font-weight: 700; }
-    .pt-cat-row { display: flex; gap: 8px; margin-bottom: 10px; } #pt-cat-sort { background: #18191f; border: 1px solid #2b2d36; border-radius: 5px; padding: 8px 10px; color: #eaecf0; font-family: inherit; font-size: 13px; outline: none; cursor: pointer; flex-shrink: 0; } #pt-cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 7px; max-height: 230px; overflow-y: auto; } #pt-cat-grid::-webkit-scrollbar { width: 4px; } #pt-cat-grid::-webkit-scrollbar-thumb { background: #2b2d36; border-radius: 2px; }
-    .pt-citem { background: #18191f; border: 2px solid #2b2d36; border-radius: 6px; padding: 7px; cursor: pointer; text-align: center; transition: border-color 0.12s, background 0.12s; } .pt-citem:hover { border-color: #1a73e8; background: #1c2538; } .pt-citem.sel { border-color: #1a73e8; background: #1c2538; } .pt-citem img { width: 100%; aspect-ratio: 1; border-radius: 4px; display: block; margin-bottom: 4px; background: #22242b; object-fit: cover; } .pt-citem-n { font-size: 9px; color: #7c8494; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pt-citem-v { font-size: 9px; color: #1a73e8; font-weight: 700; } .pt-citem-r { font-size: 9px; color: #555c6b; }
-    #pt-target-preview { display: none; align-items: center; gap: 12px; background: #18191f; border: 1px solid #2b2d36; border-radius: 6px; padding: 10px 12px; margin-top: 10px; } #pt-target-preview.vis { display: flex; } #pt-target-preview img { width: 46px; height: 46px; border-radius: 5px; background: #22242b; } #pt-tgt-name { font-weight: 600; color: #eaecf0; font-size: 13px; margin-bottom: 2px; } #pt-tgt-stats { font-size: 11px; color: #555c6b; } #pt-tgt-stats span { color: #1a73e8; font-weight: 600; }
-    .pt-ctrl-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; } .pt-ctrl-lbl { font-size: 12px; color: #7c8494; white-space: nowrap; } .pt-stepper { display: flex; align-items: center; background: #18191f; border: 1px solid #2b2d36; border-radius: 5px; overflow: hidden; } .pt-step-btn { width: 28px; height: 28px; background: none; border: none; color: #c9cdd4; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: background 0.12s; } .pt-step-btn:hover { background: #2b2d36; } .pt-step-v { min-width: 38px; text-align: center; font-size: 12px; font-weight: 600; color: #eaecf0; border-left: 1px solid #2b2d36; border-right: 1px solid #2b2d36; padding: 0 5px; height: 28px; line-height: 28px; }
-    #pt-prog-wrap { margin-bottom: 10px; display: none; } #pt-prog-bg { height: 5px; background: #2b2d36; border-radius: 3px; overflow: hidden; margin-bottom: 5px; } #pt-prog-fill { height: 100%; background: #1a73e8; border-radius: 3px; width: 0%; transition: width 0.3s ease; } #pt-prog-row { display: flex; justify-content: space-between; font-size: 11px; color: #555c6b; }
-    #pt-log { background: #121318; border: 1px solid #2b2d36; border-radius: 5px; padding: 8px 10px; max-height: 95px; overflow-y: auto; margin-bottom: 10px; font-size: 11px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.65; color: #555c6b; } #pt-log::-webkit-scrollbar { width: 3px; } #pt-log::-webkit-scrollbar-thumb { background: #2b2d36; } .pt-ok { color: #4ade80; } .pt-err { color: #f87171; } .pt-info { color: #60a5fa; }
-    .pt-lk-result { display: none; align-items: center; gap: 12px; background: #18191f; border: 1px solid #2b2d36; border-radius: 6px; padding: 12px; margin-top: 10px; } .pt-lk-result.vis { display: flex; } .pt-lk-result img { width: 54px; height: 54px; border-radius: 5px; background: #22242b; } .pt-lk-name { font-weight: 600; color: #eaecf0; font-size: 14px; margin-bottom: 4px; } .pt-lk-stats { font-size: 12px; color: #555c6b; line-height: 1.8; } .pt-lk-stats b { color: #c9cdd4; } .dem { font-weight: 700; } .dem-hi { color: #4ade80; } .dem-lo { color: #f87171; } .dem-n { color: #60a5fa; } .dem-u { color: #7c8494; }
-    #pt-howto { background: #1a1c22; border: 1px solid #2b2d36; border-radius: 6px; padding: 12px 14px; font-size: 12px; color: #555c6b; line-height: 1.8; margin-top: 8px; display: none; } #pt-howto.open { display: block; }
-    .pt-chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.2); border-radius: 4px; padding: 3px 8px; font-size: 11px; color: #f87171; margin: 3px; } .pt-chip-rm { cursor: pointer; } .pt-chip-rm:hover { color: #fff; }
+    #pt-fab{position:fixed;bottom:28px;right:28px;width:48px;height:48px;background:#1a73e8;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:999998;box-shadow:0 4px 20px rgba(0,0,0,.5);border:none;transition:background .2s,transform .15s}
+    #pt-fab:hover{background:#1260cc;transform:scale(1.06)}
+    #pt-fab svg{width:22px;height:22px;fill:#fff}
+    #pt-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999999;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .18s}
+    #pt-overlay.open{opacity:1;pointer-events:all}
+    #pt-modal{width:700px;max-width:96vw;max-height:88vh;background:#1c1e24;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 80px rgba(0,0,0,.75);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;color:#c9cdd4;transform:translateY(12px) scale(.98);transition:transform .18s}
+    #pt-overlay.open #pt-modal{transform:translateY(0) scale(1)}
+    #pt-header{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:#15171c;border-bottom:1px solid #25272e;flex-shrink:0}
+    #pt-title{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;color:#eaecf0}
+    #pt-title svg{width:17px;height:17px;fill:#1a73e8;flex-shrink:0}
+    #pt-close{background:none;border:none;color:#555c6b;font-size:22px;cursor:pointer;line-height:1;padding:2px 5px;border-radius:4px;transition:color .15s,background .15s}
+    #pt-close:hover{color:#eaecf0;background:#25272e}
+    #pt-tabs{display:flex;background:#15171c;border-bottom:1px solid #25272e;flex-shrink:0;overflow-x:auto}
+    #pt-tabs::-webkit-scrollbar{display:none}
+    .pt-tab{padding:11px 18px;cursor:pointer;font-size:13px;font-weight:500;color:#555c6b;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
+    .pt-tab:hover{color:#c9cdd4}.pt-tab.active{color:#1a73e8;border-bottom-color:#1a73e8}
+    #pt-body{overflow-y:auto;flex:1;min-height:0}
+    #pt-body::-webkit-scrollbar{width:5px}
+    #pt-body::-webkit-scrollbar-thumb{background:#2e3039;border-radius:3px}
+    .pt-pane{display:none;padding:16px 18px}.pt-pane.active{display:block}
+    .pt-warn{background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:6px;padding:10px 13px;color:#f87171;font-size:12px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+    .pt-box{background:#22242b;border:1px solid #2b2d36;border-radius:6px;padding:14px 14px 12px;margin-bottom:12px}
+    .pt-box-title{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#555c6b;margin-bottom:11px}
+    .pt-box-title em{color:#1a73e8;font-style:normal;font-weight:700}
+    .pt-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 15px;border:none;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:background .15s,opacity .15s;white-space:nowrap}
+    .pt-btn:disabled{opacity:.35;cursor:not-allowed}
+    .pt-btn-blue{background:#1a73e8;color:#fff}.pt-btn-blue:hover:not(:disabled){background:#1260cc}
+    .pt-btn-green{background:#1a8f4a;color:#fff}.pt-btn-green:hover:not(:disabled){background:#177a3f}
+    .pt-btn-red{background:#c0392b;color:#fff}.pt-btn-red:hover:not(:disabled){background:#a93226}
+    .pt-btn-dark{background:#2b2d36;color:#c9cdd4;border:1px solid #34363f}.pt-btn-dark:hover:not(:disabled){background:#32343e}
+    .pt-btn-w{width:100%}
+    .pt-input{background:#18191f;border:1px solid #2b2d36;border-radius:5px;padding:8px 11px;color:#eaecf0;font-family:inherit;font-size:13px;outline:none;width:100%;box-sizing:border-box;transition:border-color .15s}
+    .pt-input:focus{border-color:#1a73e8}.pt-input::placeholder{color:#3e4351}
+    #pt-inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:7px;max-height:175px;overflow-y:auto;margin-top:10px}
+    #pt-inv-grid::-webkit-scrollbar{width:4px}
+    #pt-inv-grid::-webkit-scrollbar-thumb{background:#2b2d36;border-radius:2px}
+    .pt-iitem{background:#18191f;border:2px solid #2b2d36;border-radius:6px;padding:6px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}
+    .pt-iitem:hover{border-color:#1a73e8;background:#1c2538}.pt-iitem.sel{border-color:#1a73e8;background:#1c2538}
+    .pt-iitem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:3px;background:#22242b;object-fit:cover}
+    .pt-iitem-n{font-size:9px;color:#7c8494;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .pt-iitem-v{font-size:9px;color:#1a73e8;font-weight:700}
+    .pt-cat-row{display:flex;gap:8px;margin-bottom:10px}
+    #pt-cat-sort{background:#18191f;border:1px solid #2b2d36;border-radius:5px;padding:8px 10px;color:#eaecf0;font-family:inherit;font-size:13px;outline:none;cursor:pointer;flex-shrink:0}
+    #pt-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:7px;max-height:230px;overflow-y:auto}
+    #pt-cat-grid::-webkit-scrollbar{width:4px}
+    #pt-cat-grid::-webkit-scrollbar-thumb{background:#2b2d36;border-radius:2px}
+    .pt-citem{background:#18191f;border:2px solid #2b2d36;border-radius:6px;padding:7px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}
+    .pt-citem:hover{border-color:#1a73e8;background:#1c2538}.pt-citem.sel{border-color:#1a73e8;background:#1c2538}
+    .pt-citem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:4px;background:#22242b;object-fit:cover}
+    .pt-citem-n{font-size:9px;color:#7c8494;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .pt-citem-v{font-size:9px;color:#1a73e8;font-weight:700}.pt-citem-r{font-size:9px;color:#555c6b}
+    #pt-target-preview{display:none;align-items:center;gap:12px;background:#18191f;border:1px solid #2b2d36;border-radius:6px;padding:10px 12px;margin-top:10px}
+    #pt-target-preview.vis{display:flex}
+    #pt-target-preview img{width:46px;height:46px;border-radius:5px;background:#22242b}
+    #pt-tgt-name{font-weight:600;color:#eaecf0;font-size:13px;margin-bottom:2px}
+    #pt-tgt-stats{font-size:11px;color:#555c6b}
+    #pt-tgt-stats span{color:#1a73e8;font-weight:600}
+    .pt-ctrl-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+    .pt-ctrl-lbl{font-size:12px;color:#7c8494;white-space:nowrap}
+    .pt-stepper{display:flex;align-items:center;background:#18191f;border:1px solid #2b2d36;border-radius:5px;overflow:hidden}
+    .pt-step-btn{width:28px;height:28px;background:none;border:none;color:#c9cdd4;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:background .12s}
+    .pt-step-btn:hover{background:#2b2d36}
+    .pt-step-v{min-width:38px;text-align:center;font-size:12px;font-weight:600;color:#eaecf0;border-left:1px solid #2b2d36;border-right:1px solid #2b2d36;padding:0 5px;height:28px;line-height:28px}
+    .pt-prog-wrap{margin-bottom:10px;display:none}
+    .pt-prog-bg{height:5px;background:#2b2d36;border-radius:3px;overflow:hidden;margin-bottom:5px}
+    .pt-prog-fill{height:100%;border-radius:3px;width:0%;transition:width .3s ease}
+    .pt-prog-fill-blue{background:#1a73e8}.pt-prog-fill-red{background:#c0392b}
+    .pt-prog-row{display:flex;justify-content:space-between;font-size:11px;color:#555c6b}
+    .pt-log{background:#121318;border:1px solid #2b2d36;border-radius:5px;padding:8px 10px;max-height:95px;overflow-y:auto;margin-bottom:10px;font-size:11px;font-family:'Consolas','Courier New',monospace;line-height:1.65;color:#555c6b}
+    .pt-log::-webkit-scrollbar{width:3px}
+    .pt-log::-webkit-scrollbar-thumb{background:#2b2d36}
+    .pt-ok{color:#4ade80}.pt-err{color:#f87171}.pt-info{color:#60a5fa}
+    .pt-lk-result{display:none;align-items:center;gap:12px;background:#18191f;border:1px solid #2b2d36;border-radius:6px;padding:12px;margin-top:10px}
+    .pt-lk-result.vis{display:flex}
+    .pt-lk-result img{width:54px;height:54px;border-radius:5px;background:#22242b}
+    .pt-lk-name{font-weight:600;color:#eaecf0;font-size:14px;margin-bottom:4px}
+    .pt-lk-stats{font-size:12px;color:#555c6b;line-height:1.8}
+    .pt-lk-stats b{color:#c9cdd4}
+    .dem{font-weight:700}.dem-hi{color:#4ade80}.dem-lo{color:#f87171}.dem-n{color:#60a5fa}.dem-u{color:#7c8494}
+    .pt-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.2);border-radius:4px;padding:3px 8px;font-size:11px;color:#f87171;margin:3px}
+    .pt-chip-rm{cursor:pointer}.pt-chip-rm:hover{color:#fff}
+
+    /* ── Cancel Tab ── */
+    #pt-trades-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow-y:auto;margin-top:10px}
+    #pt-trades-list::-webkit-scrollbar{width:4px}
+    #pt-trades-list::-webkit-scrollbar-thumb{background:#2b2d36;border-radius:2px}
+    .pt-trade-row{display:flex;align-items:center;gap:10px;background:#18191f;border:1px solid #2b2d36;border-radius:6px;padding:9px 11px;transition:border-color .12s,opacity .2s;cursor:pointer}
+    .pt-trade-row:hover{border-color:#3a3d45}
+    .pt-trade-row.sel{border-color:#c0392b;background:#1f1919}
+    .pt-trade-row.gone{opacity:.25;pointer-events:none}
+    .pt-trade-check{width:15px;height:15px;accent-color:#c0392b;cursor:pointer;flex-shrink:0}
+    .pt-trade-partner{font-size:12px;font-weight:600;color:#eaecf0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pt-trade-meta{font-size:10px;color:#555c6b;flex-shrink:0;white-space:nowrap}
+    .pt-trade-id{font-size:10px;color:#2e3039;font-family:monospace;flex-shrink:0}
+    .pt-sel-bar{display:flex;align-items:center;gap:10px;font-size:12px;color:#7c8494}
+    .pt-sel-bar input{width:15px;height:15px;accent-color:#c0392b;cursor:pointer}
+    .pt-sel-bar label{cursor:pointer;user-select:none}
   `;
   document.head.appendChild(style);
 
+  // ─── HTML ─────────────────────────────────
   const wrap = document.createElement('div');
   wrap.innerHTML = `
-    <button id="pt-fab" title="Open PekoraTrader"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+    <button id="pt-fab" title="PekoraTrader"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
     <div id="pt-overlay">
       <div id="pt-modal">
         <div id="pt-header">
-          <div id="pt-title"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg> PekoraTrader — Mass Trade Sender</div>
+          <div id="pt-title"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>PekoraTrader — Mass Trade Sender</div>
           <button id="pt-close">×</button>
         </div>
         <div id="pt-tabs">
           <div class="pt-tab active" data-pane="blast">Blast All Owners</div>
+          <div class="pt-tab" data-pane="cancel">Cancel Trades</div>
           <div class="pt-tab" data-pane="lookup">Item / Player Lookup</div>
           <div class="pt-tab" data-pane="settings">Settings</div>
         </div>
         <div id="pt-body">
+
+          <!-- BLAST -->
           <div class="pt-pane active" id="pt-pane-blast">
             <div class="pt-warn">⚠ ABUSING THIS MAY RESULT IN A BAN. ANY ACTIONS YOU TAKE ARE NOT OUR FAULT.</div>
             <div class="pt-box">
@@ -105,9 +165,9 @@
               <div id="pt-inv-grid"><div style="color:#3e4351;font-size:12px;padding:6px 0">Click above to load your inventory</div></div>
             </div>
             <div class="pt-box">
-              <div class="pt-box-title">2. Target item <em id="pt-target-label">(asset ID)</em></div>
+              <div class="pt-box-title">2. Target item <em id="pt-target-label"></em></div>
               <div class="pt-cat-row">
-                <input class="pt-input" id="pt-cat-search" placeholder="Search item by name..." style="flex:1" />
+                <input class="pt-input" id="pt-cat-search" placeholder="Search item by name..." style="flex:1"/>
                 <select id="pt-cat-sort">
                   <option value="val-d">Value ↓</option><option value="val-a">Value ↑</option>
                   <option value="rap-d">RAP ↓</option><option value="rap-a">RAP ↑</option>
@@ -116,84 +176,117 @@
               </div>
               <div id="pt-cat-grid"><div style="color:#3e4351;font-size:12px">Loading Kolimons catalog...</div></div>
               <div id="pt-target-preview">
-                <img id="pt-tgt-img" src="" onerror="this.src='https://kolimons.xyz/logo.png'" />
+                <img id="pt-tgt-img" src="" onerror="this.src='https://kolimons.xyz/logo.png'"/>
                 <div style="flex:1"><div id="pt-tgt-name"></div><div id="pt-tgt-stats"></div></div>
                 <button class="pt-btn pt-btn-dark" id="pt-find-owners">Find Owners</button>
               </div>
             </div>
             <div class="pt-box">
               <div class="pt-box-title">3. Blast trades</div>
-              <div style="font-size:12px;color:#555c6b;margin-bottom:10px">Selected: <span id="pt-sel-rap" style="color:#1a73e8;font-weight:600">0 RAP</span>, <span id="pt-sel-val" style="color:#1a73e8;font-weight:600">0 Value</span> &nbsp;·&nbsp; Owners: <span id="pt-owners-n" style="color:#eaecf0;font-weight:600">0</span></div>
-              <div class="pt-ctrl-row">
-                <span class="pt-ctrl-lbl">Max users:</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-maxu-m">−</button><div class="pt-step-v" id="pt-maxu-v">All</div><button class="pt-step-btn" id="pt-maxu-p">+</button></div><button class="pt-btn pt-btn-dark" id="pt-maxcopy">Max Copies</button>
-                <span class="pt-ctrl-lbl" style="margin-left:auto">Delay:</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-delay-m">−</button><div class="pt-step-v" id="pt-delay-v">5s</div><button class="pt-step-btn" id="pt-delay-p">+</button></div>
+              <div style="font-size:12px;color:#555c6b;margin-bottom:10px">
+                Selected: <span id="pt-sel-rap" style="color:#1a73e8;font-weight:600">0 RAP</span>,
+                <span id="pt-sel-val" style="color:#1a73e8;font-weight:600">0 Value</span>
+                &nbsp;·&nbsp; Owners: <span id="pt-owners-n" style="color:#eaecf0;font-weight:600">0</span>
               </div>
-              <div id="pt-prog-wrap"><div id="pt-prog-bg"><div id="pt-prog-fill"></div></div><div id="pt-prog-row"><span id="pt-prog-status">Sending...</span><span id="pt-prog-count">0 / 0</span></div></div>
-              <div id="pt-log"><span class="pt-info">// Ready. Load inventory, pick a target, find owners, then blast.</span></div>
-              <div style="display:flex;gap:8px;margin-bottom:8px">
+              <div class="pt-ctrl-row">
+                <span class="pt-ctrl-lbl">Max users:</span>
+                <div class="pt-stepper"><button class="pt-step-btn" id="pt-maxu-m">−</button><div class="pt-step-v" id="pt-maxu-v">All</div><button class="pt-step-btn" id="pt-maxu-p">+</button></div>
+                <button class="pt-btn pt-btn-dark" id="pt-maxcopy">Max Copies</button>
+                <span class="pt-ctrl-lbl" style="margin-left:auto">Delay:</span>
+                <div class="pt-stepper"><button class="pt-step-btn" id="pt-delay-m">−</button><div class="pt-step-v" id="pt-delay-v">5s</div><button class="pt-step-btn" id="pt-delay-p">+</button></div>
+              </div>
+              <div class="pt-prog-wrap" id="pt-prog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-blue" id="pt-prog-fill"></div></div><div class="pt-prog-row"><span id="pt-prog-status">Sending...</span><span id="pt-prog-count">0/0</span></div></div>
+              <div class="pt-log" id="pt-log"><span class="pt-info">// Ready.</span></div>
+              <div style="display:flex;gap:8px">
                 <button class="pt-btn pt-btn-green pt-btn-w" id="pt-send" disabled>Send All Trades</button>
                 <button class="pt-btn pt-btn-red" id="pt-stop" disabled style="min-width:76px">Stop</button>
               </div>
             </div>
           </div>
+
+          <!-- CANCEL TRADES -->
+          <div class="pt-pane" id="pt-pane-cancel">
+            <div class="pt-box">
+              <div class="pt-box-title">Outbound Trades <em id="pt-cancel-count">(none loaded)</em></div>
+              <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-trades" style="margin-bottom:12px">Load All Outbound Trades</button>
+              <div class="pt-sel-bar">
+                <input type="checkbox" id="pt-select-all"/>
+                <label for="pt-select-all">Select all</label>
+                <span style="margin-left:auto;color:#eaecf0;font-weight:600;font-size:12px"><span id="pt-sel-trade-n">0</span> selected</span>
+              </div>
+              <div id="pt-trades-list"><div style="color:#3e4351;font-size:12px;padding:4px 0">Load your outbound trades above to get started.</div></div>
+            </div>
+            <div class="pt-box">
+              <div class="pt-box-title">Cancel Selected</div>
+              <div class="pt-ctrl-row" style="margin-bottom:12px">
+                <span class="pt-ctrl-lbl">Delay between cancels:</span>
+                <div class="pt-stepper"><button class="pt-step-btn" id="pt-cdelay-m">−</button><div class="pt-step-v" id="pt-cdelay-v">2s</div><button class="pt-step-btn" id="pt-cdelay-p">+</button></div>
+              </div>
+              <div class="pt-prog-wrap" id="pt-cprog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-red" id="pt-cprog-fill"></div></div><div class="pt-prog-row"><span id="pt-cprog-status">Cancelling...</span><span id="pt-cprog-count">0/0</span></div></div>
+              <div class="pt-log" id="pt-cancel-log"><span class="pt-info">// Select trades then hit Cancel Selected.</span></div>
+              <div style="display:flex;gap:8px">
+                <button class="pt-btn pt-btn-red pt-btn-w" id="pt-do-cancel" disabled>Cancel Selected</button>
+                <button class="pt-btn pt-btn-dark" id="pt-cancel-stop" disabled style="min-width:76px">Stop</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- LOOKUP -->
           <div class="pt-pane" id="pt-pane-lookup">
             <div class="pt-box">
               <div class="pt-box-title">Item Lookup</div>
-              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-item-q" placeholder="Item name or asset ID..." style="flex:1" /><button class="pt-btn pt-btn-blue" id="pt-lk-item-go">Search</button></div>
-              <div class="pt-lk-result" id="pt-lk-item-r"><img id="pt-lk-item-img" src="" onerror="this.src='https://kolimons.xyz/logo.png'" /><div><div class="pt-lk-name" id="pt-lk-item-name"></div><div class="pt-lk-stats" id="pt-lk-item-stats"></div></div></div>
+              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-item-q" placeholder="Item name or asset ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-item-go">Search</button></div>
+              <div class="pt-lk-result" id="pt-lk-item-r"><img id="pt-lk-item-img" src="" onerror="this.src='https://kolimons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-item-name"></div><div class="pt-lk-stats" id="pt-lk-item-stats"></div></div></div>
             </div>
             <div class="pt-box">
-               <div class="pt-box-title">Player Lookup</div>
-              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-user-q" placeholder="User ID..." style="flex:1" /><button class="pt-btn pt-btn-blue" id="pt-lk-user-go">Search</button></div>
-              <div class="pt-lk-result" id="pt-lk-user-r"><img id="pt-lk-user-img" src="" style="border-radius:50%" onerror="this.src='https://kolimons.xyz/logo.png'" /><div><div class="pt-lk-name" id="pt-lk-user-name"></div><div class="pt-lk-stats" id="pt-lk-user-stats"></div></div></div>
+              <div class="pt-box-title">Player Lookup</div>
+              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-user-q" placeholder="User ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-user-go">Search</button></div>
+              <div class="pt-lk-result" id="pt-lk-user-r"><img id="pt-lk-user-img" src="" style="border-radius:50%" onerror="this.src='https://kolimons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-user-name"></div><div class="pt-lk-stats" id="pt-lk-user-stats"></div></div></div>
             </div>
           </div>
+
+          <!-- SETTINGS -->
           <div class="pt-pane" id="pt-pane-settings">
             <div class="pt-box">
               <div class="pt-box-title">Blacklisted Users</div>
-              <div style="display:flex;gap:8px;margin-bottom:10px"><input class="pt-input" id="pt-bl-q" placeholder="User ID or username..." style="flex:1" /><button class="pt-btn pt-btn-red" id="pt-bl-add">Block</button></div>
+              <div style="display:flex;gap:8px;margin-bottom:10px"><input class="pt-input" id="pt-bl-q" placeholder="User ID or username..." style="flex:1"/><button class="pt-btn pt-btn-red" id="pt-bl-add">Block</button></div>
               <div id="pt-bl-list" style="min-height:22px"></div>
             </div>
             <div class="pt-box">
               <div class="pt-box-title">Rate Limit Backoff</div>
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:12px;color:#7c8494">Base wait time</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-bo-m">−</button><div class="pt-step-v" id="pt-bo-v">15s</div><button class="pt-step-btn" id="pt-bo-p">+</button></div>
+                <span style="font-size:12px;color:#7c8494">Base wait time</span>
+                <div class="pt-stepper"><button class="pt-step-btn" id="pt-bo-m">−</button><div class="pt-step-v" id="pt-bo-v">15s</div><button class="pt-step-btn" id="pt-bo-p">+</button></div>
               </div>
               <div style="font-size:11px;color:#3e4351;line-height:1.7">On each rate limit hit: waits <b style="color:#7c8494">base × 2^n</b> before retrying.<br/>15s → 30s → 60s → 120s → ...</div>
             </div>
           </div>
+
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
   document.body.appendChild(wrap);
 
+  // ─── MODAL / TABS ─────────────────────────
   const overlay = document.getElementById('pt-overlay');
   document.getElementById('pt-fab').onclick = () => overlay.classList.add('open');
   document.getElementById('pt-close').onclick = () => overlay.classList.remove('open');
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
-
   document.querySelectorAll('.pt-tab').forEach(t => {
     t.addEventListener('click', () => {
-      document.querySelectorAll('.pt-tab, .pt-pane').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.pt-tab,.pt-pane').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       document.getElementById(`pt-pane-${t.dataset.pane}`).classList.add('active');
     });
   });
 
-  // ─────────────────────────────────────────
-  // UTILS & CORE FIXES
-  // ─────────────────────────────────────────
-  // FIX 1: Auto-updating CSRF Token system
+  // ─── UTILS ───────────────────────────────
   let cachedCsrf = '';
 
   function getCSRF() {
     try {
       const c = document.cookie.split(';').find(x => x.trim().startsWith('rbxcsrf4='));
-      if (c) {
-        const payload = JSON.parse(atob(c.trim().slice('rbxcsrf4='.length).split('.')[1]));
-        return atob(payload.csrf);
-      }
+      if (c) { const p = JSON.parse(atob(c.trim().slice('rbxcsrf4='.length).split('.')[1])); return atob(p.csrf); }
     } catch {}
     const m = document.querySelector('meta[name="csrf-token"]');
     return m ? m.content : '';
@@ -201,97 +294,80 @@
 
   async function getMyUid() {
     if (window.Roblox?.CurrentUser?.userId) return String(window.Roblox.CurrentUser.userId);
-    const meta = document.querySelector('meta[name="user-data"], [data-user-id], [data-userid]');
-    if (meta) return meta.dataset.userid || meta.dataset.userId || meta.getAttribute('data-user-id');
+    const el = document.querySelector('[data-user-id],[data-userid]');
+    if (el) return el.dataset.userid || el.dataset.userId || el.getAttribute('data-user-id');
     const mc = document.cookie.match(/(?:^|;\s*)UserId=(\d+)/i);
-    if (mc && mc[1]) return String(mc[1]);
+    if (mc) return String(mc[1]);
     try {
-      const res = await siteReq('GET', 'https://www.pekora.zip/apisite/users/v1/users/authenticated');
-      if (res.status === 200) { const data = JSON.parse(res.body); if (data && data.id) return String(data.id); }
-    } catch (e) {}
+      const r = await siteReq('GET', 'https://www.pekora.zip/apisite/users/v1/users/authenticated');
+      if (r.status === 200) { const d = JSON.parse(r.body); if (d?.id) return String(d.id); }
+    } catch {}
     return null;
   }
 
-  function getThumb(id) { return `https://www.pekora.zip/Thumbs/Asset.ashx?width=420&height=420&assetId=${id}`; }
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-  function log(msg, cls = '') {
-    const el = document.getElementById('pt-log'); if (!el) return;
+  const getThumb = id => `https://www.pekora.zip/Thumbs/Asset.ashx?width=420&height=420&assetId=${id}`;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function log(id, msg, cls = '') {
+    const el = document.getElementById(id); if (!el) return;
     const d = document.createElement('div'); if (cls) d.className = cls;
     d.textContent = `[${new Date().toLocaleTimeString('en-US',{hour12:false})}] ${msg}`;
     el.appendChild(d); el.scrollTop = el.scrollHeight;
   }
-  function setProgress(done, total, status) {
-    document.getElementById('pt-prog-fill').style.width = total > 0 ? `${(done/total)*100}%` : '0%';
-    document.getElementById('pt-prog-count').textContent = `${done} / ${total}`;
-    if (status) document.getElementById('pt-prog-status').textContent = status;
+  const blog = (m, c) => log('pt-log', m, c);
+  const clog = (m, c) => log('pt-cancel-log', m, c);
+
+  function setProgress(fillId, countId, statusId, done, total, status) {
+    document.getElementById(fillId).style.width = total > 0 ? `${(done/total)*100}%` : '0%';
+    document.getElementById(countId).textContent = `${done}/${total}`;
+    if (status && statusId) document.getElementById(statusId).textContent = status;
   }
-  function demCls(d) {
-    if (!d) return 'dem-u'; if (['high','amazing','great'].includes(d)) return 'dem-hi';
-    if (['low','terrible','awful'].includes(d)) return 'dem-lo'; return 'dem-n';
-  }
+
+  const demCls = d => !d ? 'dem-u' : ['high','amazing','great'].includes(d) ? 'dem-hi' : ['low','terrible','awful'].includes(d) ? 'dem-lo' : 'dem-n';
 
   function koliReq(path) {
-    return new Promise(resolve => {
-      GM_xmlhttpRequest({
-        method: 'GET', url: KOLIMONS + path,
-        onload: r => { try { resolve(JSON.parse(r.responseText)); } catch { resolve(null); } },
-        onerror: () => resolve(null)
-      });
-    });
+    return new Promise(resolve => GM_xmlhttpRequest({
+      method: 'GET', url: KOLIMONS + path,
+      onload: r => { try { resolve(JSON.parse(r.responseText)); } catch { resolve(null); } },
+      onerror: () => resolve(null)
+    }));
   }
 
-  // FIX 1b: siteReq automatically intercepts 403s and updates the token
   async function siteReq(method, url, data = null, isRetry = false) {
     if (!cachedCsrf) cachedCsrf = getCSRF();
-    return new Promise(resolve => {
-      GM_xmlhttpRequest({
-        method, url, withCredentials: true,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-          ...(cachedCsrf ? { 'X-CSRF-TOKEN': cachedCsrf } : {}) // Note the capitalization
-        },
-        ...(data ? { data: JSON.stringify(data) } : {}),
-        onload: async r => {
-          // If server rejects with 403, it usually sends back the correct token in the header
-          if (r.status === 403 && r.responseHeaders.match(/x-csrf-token:\s*([^\r\n]+)/i)) {
-            cachedCsrf = r.responseHeaders.match(/x-csrf-token:\s*([^\r\n]+)/i)[1];
-            if (!isRetry) {
-              const retryRes = await siteReq(method, url, data, true);
-              return resolve(retryRes);
-            }
-          }
-          resolve({ status: r.status, body: r.responseText });
-        },
-        onerror: () => resolve({ status: 0, body: '' })
-      });
-    });
+    return new Promise(resolve => GM_xmlhttpRequest({
+      method, url, withCredentials: true,
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(cachedCsrf ? { 'X-CSRF-TOKEN': cachedCsrf } : {}) },
+      ...(data ? { data: JSON.stringify(data) } : {}),
+      onload: async r => {
+        if (r.status === 403 && !isRetry) {
+          const m = r.responseHeaders.match(/x-csrf-token:\s*([^\r\n]+)/i);
+          if (m) { cachedCsrf = m[1].trim(); return resolve(await siteReq(method, url, data, true)); }
+        }
+        resolve({ status: r.status, body: r.responseText });
+      },
+      onerror: () => resolve({ status: 0, body: '' })
+    }));
   }
 
-  // ─────────────────────────────────────────
-  // CATALOG
-  // ─────────────────────────────────────────
+  // ─── CATALOG ─────────────────────────────
   let catSearch = '', catSort = 'val-d';
+
   async function loadValues() {
     const data = await koliReq('/values');
-    if (data?.byId) {
-      allItems = data.byId; log(`Loaded ${data.count} items from Kolimons`, 'pt-info'); renderCatalog();
-    } else {
-      log('Could not reach Kolimons API', 'pt-err');
-      document.getElementById('pt-cat-grid').innerHTML = '<div style="color:#f87171;font-size:12px">Could not load Kolimons items</div>';
-    }
+    if (data?.byId) { allItems = data.byId; blog(`Loaded ${data.count} items from Kolimons`, 'pt-info'); renderCatalog(); }
+    else { blog('Could not reach Kolimons API', 'pt-err'); document.getElementById('pt-cat-grid').innerHTML = '<div style="color:#f87171;font-size:12px">Could not load items</div>'; }
   }
 
   function getCatalogItems() {
     let items = Object.entries(allItems).map(([id, v]) => ({ id, ...v }));
     if (catSearch) items = items.filter(i => i.name?.toLowerCase().includes(catSearch.toLowerCase()));
     switch (catSort) {
-      case 'val-d': items.sort((a,b) => (b.value||0)-(a.value||0)); break;
-      case 'val-a': items.sort((a,b) => (a.value||0)-(b.value||0)); break;
-      case 'rap-d': items.sort((a,b) => (b.rap||0)-(a.rap||0)); break;
-      case 'rap-a': items.sort((a,b) => (a.rap||0)-(b.rap||0)); break;
-      case 'name':  items.sort((a,b) => (a.name||'').localeCompare(b.name||'')); break;
+      case 'val-d': items.sort((a,b)=>(b.value||0)-(a.value||0)); break;
+      case 'val-a': items.sort((a,b)=>(a.value||0)-(b.value||0)); break;
+      case 'rap-d': items.sort((a,b)=>(b.rap||0)-(a.rap||0)); break;
+      case 'rap-a': items.sort((a,b)=>(a.rap||0)-(b.rap||0)); break;
+      case 'name':  items.sort((a,b)=>(a.name||'').localeCompare(b.name||'')); break;
     }
     return items.slice(0, 150);
   }
@@ -304,55 +380,45 @@
     items.forEach(item => {
       const div = document.createElement('div');
       div.className = 'pt-citem' + (targetItem?.id === item.id ? ' sel' : '');
-      div.innerHTML = `<img src="${getThumb(item.id)}" loading="lazy" onerror="this.src='https://kolimons.xyz/logo.png'" /><div class="pt-citem-n" title="${item.name||''}">${item.name||'?'}</div><div class="pt-citem-v">${item.value?.toLocaleString()||'?'}</div><div class="pt-citem-r">RAP ${item.rap?.toLocaleString()||'?'}</div>`;
+      div.innerHTML = `<img src="${getThumb(item.id)}" loading="lazy" onerror="this.src='https://kolimons.xyz/logo.png'"/><div class="pt-citem-n" title="${item.name||''}">${item.name||'?'}</div><div class="pt-citem-v">${item.value?.toLocaleString()||'?'}</div><div class="pt-citem-r">RAP ${item.rap?.toLocaleString()||'?'}</div>`;
       div.addEventListener('click', () => pickTarget(item));
       grid.appendChild(div);
     });
   }
 
   function pickTarget(item) {
-    targetItem = item; owners = []; document.getElementById('pt-owners-n').textContent = '0'; document.getElementById('pt-send').disabled = true;
+    targetItem = item; owners = [];
+    document.getElementById('pt-owners-n').textContent = '0';
+    document.getElementById('pt-send').disabled = true;
     document.getElementById('pt-target-label').textContent = `(${item.name})`;
     document.getElementById('pt-tgt-img').src = getThumb(item.id);
     document.getElementById('pt-tgt-name').textContent = item.name || `Item ${item.id}`;
     document.getElementById('pt-tgt-stats').innerHTML = `Value: <span>${item.value?.toLocaleString()||'?'}</span> &nbsp;·&nbsp; RAP: <span>${item.rap?.toLocaleString()||'?'}</span> &nbsp;·&nbsp; Demand: <span class="dem ${demCls(item.demand)}">${item.demand||'untracked'}</span>`;
     document.getElementById('pt-target-preview').classList.add('vis');
-    renderCatalog(); log(`Target: ${item.name} (ID ${item.id})`, 'pt-info');
+    renderCatalog(); blog(`Target: ${item.name} (ID ${item.id})`, 'pt-info');
   }
 
   document.getElementById('pt-cat-search').addEventListener('input', e => { catSearch = e.target.value; renderCatalog(); });
   document.getElementById('pt-cat-sort').addEventListener('change', e => { catSort = e.target.value; renderCatalog(); });
 
-  // ─────────────────────────────────────────
-  // INVENTORY
-  // ─────────────────────────────────────────
+  // ─── INVENTORY ───────────────────────────
   document.getElementById('pt-load-inv').addEventListener('click', async () => {
     const uid = await getMyUid();
-    if (!uid) { log('Cannot detect your user ID — are you logged in?', 'pt-err'); return; }
-    document.getElementById('pt-inv-grid').innerHTML = '<div style="color:#3e4351;font-size:12px;padding:6px 0">Loading all items...</div>';
-    log('Fetching full inventory...', 'pt-info');
-
-    myInventory = [];
-    let cursor = '';
+    if (!uid) { blog('Cannot detect your user ID — are you logged in?', 'pt-err'); return; }
+    document.getElementById('pt-inv-grid').innerHTML = '<div style="color:#3e4351;font-size:12px;padding:6px 0">Loading...</div>';
+    blog('Fetching inventory...', 'pt-info');
+    myInventory = []; let cursor = '';
     while (true) {
       const res = await siteReq('GET', `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?limit=100${cursor ? `&cursor=${cursor}` : ''}`);
-      let data = null;
-      try { data = JSON.parse(res.body); } catch {}
+      let data = null; try { data = JSON.parse(res.body); } catch {}
       const batch = data?.data || (Array.isArray(data) ? data : []);
       if (!batch.length) break;
       myInventory = myInventory.concat(batch);
-      cursor = data.nextPageCursor;
-      if (!cursor) break;
+      cursor = data?.nextPageCursor; if (!cursor) break;
       await sleep(200);
     }
-
-    if (!myInventory.length) {
-      log('No inventory items found', 'pt-err');
-      document.getElementById('pt-inv-grid').innerHTML = '<div style="color:#f87171;font-size:12px">No items found</div>';
-      return;
-    }
-    log(`Loaded all ${myInventory.length} inventory items`, 'pt-ok');
-    renderInventory();
+    if (!myInventory.length) { blog('No inventory items found', 'pt-err'); document.getElementById('pt-inv-grid').innerHTML = '<div style="color:#f87171;font-size:12px">No items found</div>'; return; }
+    blog(`Loaded ${myInventory.length} items`, 'pt-ok'); renderInventory();
   });
 
   function renderInventory() {
@@ -361,11 +427,10 @@
       const assetId = String(item.assetId || item.AssetId || '');
       const uasId = item.userAssetId || item.UserAssetId || item.id;
       const name = item.name || item.Name || item.assetName || `#${assetId}`;
-      const thumb = assetId ? getThumb(assetId) : (item.thumbnailUrl || item.ThumbnailUrl || '');
       const kol = allItems[assetId];
       const div = document.createElement('div');
       div.className = 'pt-iitem' + (selectedOfferItems.includes(uasId) ? ' sel' : '');
-      div.innerHTML = `<img src="${thumb}" loading="lazy" onerror="this.src='https://kolimons.xyz/logo.png'" /><div class="pt-iitem-n" title="${name}">${name}</div><div class="pt-iitem-v">${kol ? kol.value?.toLocaleString() : ''}</div>`;
+      div.innerHTML = `<img src="${getThumb(assetId)}" loading="lazy" onerror="this.src='https://kolimons.xyz/logo.png'"/><div class="pt-iitem-n" title="${name}">${name}</div><div class="pt-iitem-v">${kol ? kol.value?.toLocaleString() : ''}</div>`;
       div.addEventListener('click', () => toggleOffer(uasId, assetId, div));
       grid.appendChild(div);
     });
@@ -375,7 +440,7 @@
   function toggleOffer(uasId, assetId, el) {
     const idx = selectedOfferItems.indexOf(uasId);
     if (idx === -1) {
-      if (selectedOfferItems.length >= 4) { log('Max 4 offer items', 'pt-err'); return; }
+      if (selectedOfferItems.length >= 4) { blog('Max 4 offer items', 'pt-err'); return; }
       selectedOfferItems.push(uasId); el.classList.add('sel');
     } else { selectedOfferItems.splice(idx, 1); el.classList.remove('sel'); }
     updateOfferStats(); checkSendReady();
@@ -392,169 +457,269 @@
     document.getElementById('pt-sel-val').textContent = `${val.toLocaleString()} Value`;
   }
 
-  function checkSendReady() { document.getElementById('pt-send').disabled = !(selectedOfferItems.length > 0 && owners.length > 0 && !isRunning); }
+  const checkSendReady = () => { document.getElementById('pt-send').disabled = !(selectedOfferItems.length > 0 && owners.length > 0 && !isRunning); };
 
-  // ─────────────────────────────────────────
-  // FIND OWNERS
-  // ─────────────────────────────────────────
+  // ─── FIND OWNERS ─────────────────────────
   document.getElementById('pt-find-owners').addEventListener('click', async () => {
     if (!targetItem) return;
-    log(`Fetching owners of "${targetItem.name}"...`, 'pt-info');
-    owners = [];
-
-    let useV2 = true, cursor = '', page = 1;
+    blog(`Fetching owners of "${targetItem.name}"...`, 'pt-info');
+    owners = []; let cursor = '', page = 1, useV2 = true;
     while (true) {
-      let url = useV2
+      const url = useV2
         ? `https://www.pekora.zip/apisite/inventory/v2/assets/${targetItem.id}/owners?limit=100&sortOrder=Asc${cursor ? `&cursor=${cursor}` : ''}`
         : `https://www.pekora.zip/apisite/inventory/v1/assets/${targetItem.id}/owners?pageNumber=${page}&limit=100`;
-
       const res = await siteReq('GET', url);
       if (useV2 && res.status === 404 && !cursor) { useV2 = false; continue; }
-
       let data = null; try { data = JSON.parse(res.body); } catch {}
       const batch = data?.data || data?.owners || (Array.isArray(data) ? data : []);
       if (!batch.length) break;
       owners = owners.concat(batch);
-
-      if (useV2) { cursor = data.nextPageCursor; if (!cursor) break; }
+      if (useV2) { cursor = data?.nextPageCursor; if (!cursor) break; }
       else { if (batch.length < 100) break; page++; }
       await sleep(350);
     }
     document.getElementById('pt-owners-n').textContent = owners.length;
-    if (owners.length > 0) log(`Found ${owners.length} owners`, 'pt-ok'); else log(`Found 0 owners`, 'pt-err');
+    blog(owners.length > 0 ? `Found ${owners.length} owners` : 'Found 0 owners', owners.length > 0 ? 'pt-ok' : 'pt-err');
     checkSendReady();
   });
 
-  // ─────────────────────────────────────────
-  // STEPPERS & BLAST
-  // ─────────────────────────────────────────
-  function stepper(minusId, plusId, valId, get, set, fmt) {
-    document.getElementById(minusId).addEventListener('click', () => { set(get() - 1); document.getElementById(valId).textContent = fmt(get()); });
-    document.getElementById(plusId).addEventListener('click', () => { set(get() + 1); document.getElementById(valId).textContent = fmt(get()); });
+  // ─── CANCEL TRADES ───────────────────────
+  document.getElementById('pt-load-trades').addEventListener('click', async () => {
+    clog('Loading all outbound trades...', 'pt-info');
+    document.getElementById('pt-trades-list').innerHTML = '<div style="color:#3e4351;font-size:12px;padding:4px 0">Loading...</div>';
+    document.getElementById('pt-cancel-count').textContent = '(loading...)';
+    outboundTrades = []; selectedTradeIds.clear();
+
+    let cursor = null, pages = 0;
+    while (true) {
+      const res = await siteReq('GET', OUTBOUND_URL(cursor));
+      let data = null; try { data = JSON.parse(res.body); } catch {}
+      const batch = data?.data || [];
+      if (!batch.length) break;
+      outboundTrades = outboundTrades.concat(batch);
+      cursor = data?.nextPageCursor; pages++;
+      if (outboundTrades.length > 10) clog(`Page ${pages} — ${outboundTrades.length} trades loaded...`, 'pt-info');
+      if (!cursor) break;
+      await sleep(300);
+    }
+
+    document.getElementById('pt-cancel-count').textContent = `(${outboundTrades.length} trades)`;
+    clog(`Loaded ${outboundTrades.length} outbound trades`, outboundTrades.length > 0 ? 'pt-ok' : 'pt-err');
+    renderTradesList(); syncCancelBtn();
+  });
+
+  function renderTradesList() {
+    const list = document.getElementById('pt-trades-list');
+    if (!outboundTrades.length) { list.innerHTML = '<div style="color:#555c6b;font-size:12px;padding:4px 0">No outbound trades found.</div>'; return; }
+    list.innerHTML = '';
+    outboundTrades.forEach(trade => {
+      const partner = trade.user?.name || trade.user?.displayName || `User ${trade.user?.id||'?'}`;
+      const created = trade.created ? new Date(trade.created).toLocaleDateString() : '';
+      const expires = trade.expiration ? new Date(trade.expiration).toLocaleDateString() : '';
+      const sel = selectedTradeIds.has(trade.id);
+
+      const row = document.createElement('div');
+      row.className = 'pt-trade-row' + (sel ? ' sel' : '');
+      row.dataset.id = trade.id;
+      row.innerHTML = `
+        <input type="checkbox" class="pt-trade-check" data-id="${trade.id}" ${sel ? 'checked' : ''}/>
+        <span class="pt-trade-partner">${partner}</span>
+        <span class="pt-trade-meta">exp. ${expires}</span>
+        <span class="pt-trade-id">#${trade.id}</span>
+      `;
+
+      const cb = row.querySelector('.pt-trade-check');
+      const toggle = checked => {
+        if (checked) { selectedTradeIds.add(trade.id); row.classList.add('sel'); }
+        else { selectedTradeIds.delete(trade.id); row.classList.remove('sel'); }
+        document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
+        syncCancelBtn(); syncSelectAll();
+      };
+      cb.addEventListener('change', () => toggle(cb.checked));
+      row.addEventListener('click', e => { if (e.target === cb) return; cb.checked = !cb.checked; toggle(cb.checked); });
+      list.appendChild(row);
+    });
+    document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
   }
 
-  stepper('pt-maxu-m', 'pt-maxu-p', 'pt-maxu-v', () => maxUsers, v => { maxUsers = Math.max(0, v); }, v => v === 0 ? 'All' : v);
-  stepper('pt-delay-m', 'pt-delay-p', 'pt-delay-v', () => delaySeconds, v => { delaySeconds = Math.max(1, v); }, v => `${v}s`);
-  stepper('pt-bo-m', 'pt-bo-p', 'pt-bo-v', () => backoffBase, v => { backoffBase = Math.max(5, v); }, v => `${v}s`);
-  document.getElementById('pt-maxcopy').addEventListener('click', () => { maxUsers = owners.length; document.getElementById('pt-maxu-v').textContent = maxUsers; });
+  function syncSelectAll() {
+    const sa = document.getElementById('pt-select-all');
+    sa.checked = outboundTrades.length > 0 && selectedTradeIds.size === outboundTrades.length;
+    sa.indeterminate = selectedTradeIds.size > 0 && selectedTradeIds.size < outboundTrades.length;
+  }
 
+  function syncCancelBtn() {
+    document.getElementById('pt-do-cancel').disabled = selectedTradeIds.size === 0 || isCancelling;
+  }
+
+  document.getElementById('pt-select-all').addEventListener('change', e => {
+    outboundTrades.forEach(t => { if (e.target.checked) selectedTradeIds.add(t.id); else selectedTradeIds.delete(t.id); });
+    document.querySelectorAll('.pt-trade-check').forEach(cb => {
+      cb.checked = e.target.checked;
+      cb.closest('.pt-trade-row').classList.toggle('sel', e.target.checked);
+    });
+    document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
+    syncCancelBtn();
+  });
+
+  // Cancel delay stepper
+  document.getElementById('pt-cdelay-m').addEventListener('click', () => { cancelDelay = Math.max(1, cancelDelay-1); document.getElementById('pt-cdelay-v').textContent = `${cancelDelay}s`; });
+  document.getElementById('pt-cdelay-p').addEventListener('click', () => { cancelDelay++; document.getElementById('pt-cdelay-v').textContent = `${cancelDelay}s`; });
+
+  document.getElementById('pt-do-cancel').addEventListener('click', async () => {
+    if (isCancelling || !selectedTradeIds.size) return;
+    isCancelling = true; shouldStopCancel = false;
+    document.getElementById('pt-do-cancel').disabled = true;
+    document.getElementById('pt-cancel-stop').disabled = false;
+    document.getElementById('pt-cprog-wrap').style.display = 'block';
+
+    const toCancel = [...selectedTradeIds];
+    let done = 0, failed = 0;
+    clog(`Cancelling ${toCancel.length} trades...`, 'pt-info');
+
+    for (let i = 0; i < toCancel.length; i++) {
+      if (shouldStopCancel) { clog('Stopped.', 'pt-err'); break; }
+
+      const id = toCancel[i];
+      const trade = outboundTrades.find(t => t.id === id);
+      const partner = trade?.user?.name || `#${id}`;
+
+      const res = await siteReq('POST', CANCEL_URL(id));
+
+      if (res.status === 429) {
+        clog('Rate limited — waiting 30s...', 'pt-err');
+        setProgress('pt-cprog-fill', 'pt-cprog-count', 'pt-cprog-status', done+failed, toCancel.length, 'Rate limited — 30s cooldown');
+        await sleep(30000); i--; continue;
+      }
+
+      if (res.status === 200) {
+        done++;
+        clog(`✓ Cancelled trade with ${partner}`, 'pt-ok');
+        selectedTradeIds.delete(id);
+        outboundTrades = outboundTrades.filter(t => t.id !== id);
+        const row = document.querySelector(`.pt-trade-row[data-id="${id}"]`);
+        if (row) row.classList.add('gone');
+      } else {
+        failed++;
+        clog(`✗ Failed #${id} (HTTP ${res.status})`, 'pt-err');
+      }
+
+      setProgress('pt-cprog-fill', 'pt-cprog-count', 'pt-cprog-status', done+failed, toCancel.length, 'Cancelling...');
+      if (i < toCancel.length-1 && !shouldStopCancel) await sleep(cancelDelay * 1000);
+    }
+
+    clog(`Done — Cancelled: ${done}  Failed: ${failed}`, 'pt-ok');
+    document.getElementById('pt-cancel-count').textContent = `(${outboundTrades.length} remaining)`;
+    document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
+    isCancelling = false;
+    document.getElementById('pt-cancel-stop').disabled = true;
+    syncCancelBtn(); syncSelectAll();
+    setProgress('pt-cprog-fill', 'pt-cprog-count', 'pt-cprog-status', done+failed, toCancel.length, 'Complete');
+    if (done > 0) GM_notification({ title: 'PekoraTrader', text: `Cancelled ${done} trades.`, timeout: 4000 });
+  });
+
+  document.getElementById('pt-cancel-stop').addEventListener('click', () => { shouldStopCancel = true; clog('Stopping...', 'pt-err'); });
+
+  // ─── BLAST ───────────────────────────────
+  function stepper(mId, pId, vId, get, set, fmt) {
+    document.getElementById(mId).addEventListener('click', () => { set(get()-1); document.getElementById(vId).textContent = fmt(get()); });
+    document.getElementById(pId).addEventListener('click', () => { set(get()+1); document.getElementById(vId).textContent = fmt(get()); });
+  }
+  stepper('pt-maxu-m','pt-maxu-p','pt-maxu-v', ()=>maxUsers, v=>{maxUsers=Math.max(0,v);}, v=>v===0?'All':v);
+  stepper('pt-delay-m','pt-delay-p','pt-delay-v', ()=>delaySeconds, v=>{delaySeconds=Math.max(1,v);}, v=>`${v}s`);
+  stepper('pt-bo-m','pt-bo-p','pt-bo-v', ()=>backoffBase, v=>{backoffBase=Math.max(5,v);}, v=>`${v}s`);
+  document.getElementById('pt-maxcopy').addEventListener('click', () => { maxUsers = owners.length; document.getElementById('pt-maxu-v').textContent = maxUsers; });
   document.getElementById('pt-send').addEventListener('click', blast);
-  document.getElementById('pt-stop').addEventListener('click', () => { shouldStop = true; log('Stopping after current trade...', 'pt-err'); });
+  document.getElementById('pt-stop').addEventListener('click', () => { shouldStop = true; blog('Stopping...', 'pt-err'); });
 
   async function blast() {
     if (isRunning) return;
     const myUid = await getMyUid();
-    if (!myUid) { log('Cannot detect your user ID', 'pt-err'); return; }
-
-    const blacklist = (GM_getValue('blacklistUsers', '')).split(',').map(s => s.trim()).filter(Boolean);
+    if (!myUid) { blog('Cannot detect your user ID', 'pt-err'); return; }
+    const blacklist = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
     const limit = maxUsers === 0 ? owners.length : Math.min(maxUsers, owners.length);
     const queue = owners.slice(0, limit).filter(o => {
-      const uid = String(o.userId || o.id || o.owner?.userId || o.owner?.id || '');
-      const uname = (o.username || o.name || o.owner?.username || o.owner?.name || '').toLowerCase();
+      const uid = String(o.userId||o.owner?.userId||o.owner?.id||o.id||'');
+      const uname = (o.username||o.owner?.username||o.name||'').toLowerCase();
       return uid !== myUid && !blacklist.includes(uid) && !blacklist.map(x=>x.toLowerCase()).includes(uname);
     });
-
-    if (!queue.length) { log('No valid targets in queue', 'pt-err'); return; }
-
+    if (!queue.length) { blog('No valid targets', 'pt-err'); return; }
     isRunning = true; shouldStop = false; consecutiveRateLimits = 0;
-    document.getElementById('pt-send').disabled = true; document.getElementById('pt-stop').disabled = false;
+    document.getElementById('pt-send').disabled = true;
+    document.getElementById('pt-stop').disabled = false;
     document.getElementById('pt-prog-wrap').style.display = 'block';
-    log(`Blasting ${queue.length} targets at ${delaySeconds}s delay`, 'pt-info');
-
+    blog(`Blasting ${queue.length} targets at ${delaySeconds}s delay`, 'pt-info');
     let sent = 0, failed = 0, skipped = 0;
     for (let i = 0; i < queue.length; i++) {
-      if (shouldStop) { log('Stopped.', 'pt-err'); break; }
-
+      if (shouldStop) { blog('Stopped.', 'pt-err'); break; }
       const o = queue[i];
-      // Try multiple data structures that APIs might return for IDs
-      const theirUid = String(o.userId || o.owner?.userId || o.owner?.id || o.id);
-      const theirName = o.username || o.owner?.username || o.name || theirUid;
-
+      const theirUid = String(o.userId||o.owner?.userId||o.owner?.id||o.id);
+      const theirName = o.username||o.owner?.username||o.name||theirUid;
       const theirAssets = await getTheirAssets(theirUid, targetItem.id);
-      if (!theirAssets.length) {
-        log(`Skip ${theirName} — no userAssetId found`, '');
-        skipped++; setProgress(sent+failed+skipped, queue.length, 'Sending...'); continue;
-      }
-
+      if (!theirAssets.length) { skipped++; setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Sending...'); continue; }
       const result = await doSendTrade(myUid, theirUid, selectedOfferItems, theirAssets.slice(0,1));
       if (result.rateLimited) {
-        consecutiveRateLimits++; const wait = backoffBase * Math.pow(2, consecutiveRateLimits - 1);
-        log(`Rate limited — waiting ${wait}s`, 'pt-err');
-        setProgress(sent+failed+skipped, queue.length, `Rate limited — ${wait}s cooldown`);
-        await sleep(wait * 1000); i--; continue;
+        consecutiveRateLimits++;
+        const wait = backoffBase * Math.pow(2, consecutiveRateLimits-1);
+        blog(`Rate limited — waiting ${wait}s`, 'pt-err');
+        setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,`Rate limited — ${wait}s`);
+        await sleep(wait*1000); i--; continue;
       }
-
       consecutiveRateLimits = 0;
-      if (result.ok) { sent++; log(`✓ ${theirName}`, 'pt-ok'); }
-      else { failed++; log(`✗ ${theirName} (HTTP ${result.status})`, 'pt-err'); }
-
-      setProgress(sent+failed+skipped, queue.length, 'Sending...');
-      if (i < queue.length - 1 && !shouldStop) await sleep(delaySeconds * 1000);
+      if (result.ok) { sent++; blog(`✓ ${theirName}`, 'pt-ok'); }
+      else { failed++; blog(`✗ ${theirName} (HTTP ${result.status})`, 'pt-err'); }
+      setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Sending...');
+      if (i < queue.length-1 && !shouldStop) await sleep(delaySeconds*1000);
     }
-
-    log(`Complete — Sent: ${sent}  Failed: ${failed}  Skipped: ${skipped}`, 'pt-ok');
+    blog(`Complete — Sent: ${sent}  Failed: ${failed}  Skipped: ${skipped}`, 'pt-ok');
     if (sent > 0) GM_notification({ title: 'PekoraTrader', text: `Blast done! ${sent} trades sent.`, timeout: 5000 });
-    isRunning = false; document.getElementById('pt-stop').disabled = true; checkSendReady(); setProgress(sent+failed+skipped, queue.length, 'Complete');
+    isRunning = false;
+    document.getElementById('pt-stop').disabled = true;
+    checkSendReady();
+    setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Complete');
   }
 
-  // FIX 2: Brute force Asset Filter
   async function getTheirAssets(uid, targetAssetId) {
-    const res = await siteReq('GET', THEIR_ASSETS_URL(uid, targetAssetId));
+    const res = await siteReq('GET', `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?assetId=${targetAssetId}`);
     try {
       const data = JSON.parse(res.body);
-      let items = data?.data || (Array.isArray(data) ? data : []);
-
-      // The API often ignores the ?assetId= filter and returns their whole inventory.
-      // So we force the filter manually right here based on the targetAssetId:
-      const matches = items.filter(i => String(i.assetId || i.AssetId) === String(targetAssetId));
-
-      return matches.map(i => i.userAssetId || i.UserAssetId || i.id).filter(Boolean);
+      const items = data?.data || (Array.isArray(data) ? data : []);
+      return items.filter(i => String(i.assetId||i.AssetId) === String(targetAssetId)).map(i => i.userAssetId||i.UserAssetId||i.id).filter(Boolean);
     } catch { return []; }
   }
 
   async function doSendTrade(myUid, theirUid, myUAIds, theirUAIds) {
-    const res = await siteReq('POST', TRADE_URL, {
-      offers: [
-        { userId: myUid, userAssetIds: myUAIds, robux: null },
-        { userId: String(theirUid), userAssetIds: theirUAIds, robux: null }
-      ]
-    });
+    const res = await siteReq('POST', TRADE_URL, { offers: [{ userId: myUid, userAssetIds: myUAIds, robux: null }, { userId: String(theirUid), userAssetIds: theirUAIds, robux: null }] });
     return { ok: res.status === 200, rateLimited: res.status === 429, status: res.status };
   }
 
-  // ─────────────────────────────────────────
-  // LOOKUP
-  // ─────────────────────────────────────────
+  // ─── LOOKUP ──────────────────────────────
   async function itemLookup() {
     const q = document.getElementById('pt-lk-item-q').value.trim(); if (!q) return;
-    let item = null;
-    if (/^\d+$/.test(q)) { item = await koliReq(`/item/${q}`); }
-    else { const lower = q.toLowerCase(); const match = Object.entries(allItems).find(([, v]) => v.name?.toLowerCase().includes(lower)); if (match) item = { found: true, assetId: match[0], ...match[1] }; }
+    let item = /^\d+$/.test(q) ? await koliReq(`/item/${q}`) : null;
+    if (!item) { const m = Object.entries(allItems).find(([,v])=>v.name?.toLowerCase().includes(q.toLowerCase())); if (m) item = { found: true, assetId: m[0], ...m[1] }; }
     const r = document.getElementById('pt-lk-item-r');
     if (item?.found) {
       document.getElementById('pt-lk-item-img').src = getThumb(item.assetId);
       document.getElementById('pt-lk-item-name').textContent = item.name || `Item ${item.assetId}`;
       document.getElementById('pt-lk-item-stats').innerHTML = `<b>Value:</b> ${item.value?.toLocaleString()||'?'}<br/><b>RAP:</b> ${item.rap?.toLocaleString()||'?'}<br/><b>Demand:</b> <span class="dem ${demCls(item.demand)}">${item.demand||'untracked'}</span><br/><b>Rarity:</b> ${item.rarity||'?'}`;
       r.classList.add('vis');
-    } else { r.classList.remove('vis'); }
+    } else r.classList.remove('vis');
   }
 
-  // FIX 3: Stop Silent Fails on Player Lookup
   async function playerLookup() {
     const q = document.getElementById('pt-lk-user-q').value.trim(); if (!q) return;
-    const r = document.getElementById('pt-lk-user-r');
     const p = await koliReq(`/player/${q}`);
-
+    const r = document.getElementById('pt-lk-user-r');
     if (p?.found) {
       document.getElementById('pt-lk-user-img').src = p.avatarUrl || '';
       document.getElementById('pt-lk-user-name').textContent = `${p.displayName} (@${p.username})`;
-      document.getElementById('pt-lk-user-stats').innerHTML = `<b>Value:</b> ${p.value?.toLocaleString()||'?'}<br/><b>RAP:</b> ${p.rap?.toLocaleString()||'?'}<br/><b>Items:</b> ${p.itemCount??'?'}<br/><b>Updated:</b> ${p.lastUpdated ? new Date(p.lastUpdated).toLocaleDateString() : '?'}`;
+      document.getElementById('pt-lk-user-stats').innerHTML = `<b>Value:</b> ${p.value?.toLocaleString()||'?'}<br/><b>RAP:</b> ${p.rap?.toLocaleString()||'?'}<br/><b>Items:</b> ${p.itemCount??'?'}`;
       r.classList.add('vis');
     } else {
-      // Force UI to show the error rather than doing nothing
       document.getElementById('pt-lk-user-img').src = 'https://kolimons.xyz/logo.png';
-      document.getElementById('pt-lk-user-name').textContent = "User Not Tracked";
-      document.getElementById('pt-lk-user-stats').innerHTML = `The Kolimons database has not indexed the data for user ID: <b>${q}</b> yet.`;
+      document.getElementById('pt-lk-user-name').textContent = 'User not tracked';
+      document.getElementById('pt-lk-user-stats').innerHTML = `Kolimons has no data for user <b>${q}</b>.`;
       r.classList.add('vis');
     }
   }
@@ -564,23 +729,23 @@
   document.getElementById('pt-lk-item-q').addEventListener('keydown', e => { if (e.key==='Enter') itemLookup(); });
   document.getElementById('pt-lk-user-q').addEventListener('keydown', e => { if (e.key==='Enter') playerLookup(); });
 
-  // ─────────────────────────────────────────
-  // BLACKLIST & INIT
-  // ─────────────────────────────────────────
+  // ─── BLACKLIST ───────────────────────────
   function renderBlacklist() {
     const el = document.getElementById('pt-bl-list');
     const list = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
     if (!list.length) { el.innerHTML = '<span style="font-size:12px;color:#3e4351">Nobody blocked</span>'; return; }
-    el.innerHTML = list.map((u,i) => `<span class="pt-chip">🚫 ${u} <span class="pt-chip-rm" data-i="${i}">×</span></span>`).join('');
-    el.querySelectorAll('.pt-chip-rm').forEach(btn => { btn.addEventListener('click', () => { list.splice(Number(btn.dataset.i), 1); GM_setValue('blacklistUsers', list.join(',')); renderBlacklist(); }); });
+    el.innerHTML = list.map((u,i)=>`<span class="pt-chip">🚫 ${u} <span class="pt-chip-rm" data-i="${i}">×</span></span>`).join('');
+    el.querySelectorAll('.pt-chip-rm').forEach(btn => { btn.addEventListener('click', () => { list.splice(Number(btn.dataset.i),1); GM_setValue('blacklistUsers',list.join(',')); renderBlacklist(); }); });
   }
 
   document.getElementById('pt-bl-add').addEventListener('click', () => {
     const v = document.getElementById('pt-bl-q').value.trim(); if (!v) return;
     const list = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
-    if (!list.includes(v)) { list.push(v); GM_setValue('blacklistUsers', list.join(',')); }
+    if (!list.includes(v)) { list.push(v); GM_setValue('blacklistUsers',list.join(',')); }
     document.getElementById('pt-bl-q').value = ''; renderBlacklist();
   });
 
-  renderBlacklist(); loadValues();
+  renderBlacklist();
+  loadValues();
+
 })();
