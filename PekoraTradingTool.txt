@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Korone Trading Tool v2.2
+// @name         Korone Trading Tool v2.3
 // @namespace    https://pekora.zip
-// @version      2.2
+// @version      2.3
 // @description  Mass trade tool for pekora.zip with Koromons integration
 // @author       LMoD
 // @match        https://www.pekora.zip/*
@@ -24,509 +24,272 @@
   let allItems = {}, myInventory = [], selectedOfferItems = [];
   let targetItem = null, owners = [], consecutiveRateLimits = 0;
   let maxUsers = 0, delaySeconds = 5, backoffBase = 15;
-
   let outboundTrades = [], isCancelling = false, shouldStopCancel = false, cancelDelay = 2;
   let selectedTradeIds = new Set();
 
   // ─── ENDPOINTS ───────────────────────────
-  const TRADE_URL    = 'https://www.pekora.zip/apisite/trades/v1/trades/send';
-  const OUTBOUND_URL = cur => `https://www.pekora.zip/apisite/trades/v1/trades/outbound${cur ? `?cursor=${cur}` : ''}`;
-  const CANCEL_URL   = id  => `https://www.pekora.zip/apisite/trades/v1/trades/${id}/decline`;
-  const KOROMONS     = 'https://koromons.xyz/api';
+  // Use string concat instead of template literals for Edge compat
+  const BASE       = 'https://www.pekora.zip/apisite';
+  const TRADE_URL  = BASE + '/trades/v1/trades/send';
+  const KOROMONS   = 'https://koromons.xyz/api';
+  function OUTBOUND_URL(cur) { return BASE + '/trades/v1/trades/outbound' + (cur ? '?cursor=' + encodeURIComponent(cur) : ''); }
+  function CANCEL_URL(id)    { return BASE + '/trades/v1/trades/' + id + '/decline'; }
 
   // ─── THEMES ──────────────────────────────
   const THEMES = {
-    dark: {
-      name: 'Dark (Default)',
-      vars: {
-        '--bg-modal':   '#1c1e24',
-        '--bg-header':  '#15171c',
-        '--bg-box':     '#22242b',
-        '--bg-input':   '#18191f',
-        '--bg-item':    '#18191f',
-        '--bg-log':     '#121318',
-        '--border':     '#2b2d36',
-        '--border2':    '#25272e',
-        '--text-pri':   '#eaecf0',
-        '--text-sec':   '#c9cdd4',
-        '--text-muted': '#555c6b',
-        '--text-dim':   '#3e4351',
-        '--accent':     '#1a73e8',
-        '--accent-hov': '#1260cc',
-        '--tab-active': '#1a73e8',
-        '--notice-bg':  'rgba(234,179,8,.1)',
-        '--notice-bd':  'rgba(234,179,8,.35)',
-        '--notice-txt': '#fde047',
-        '--overlay':    'rgba(0,0,0,.6)',
-        '--scrollbar':  '#2e3039',
-      }
-    },
-    midnight: {
-      name: 'Midnight Blue',
-      vars: {
-        '--bg-modal':   '#0d1117',
-        '--bg-header':  '#090d13',
-        '--bg-box':     '#161b22',
-        '--bg-input':   '#0d1117',
-        '--bg-item':    '#0d1117',
-        '--bg-log':     '#070a0f',
-        '--border':     '#21262d',
-        '--border2':    '#161b22',
-        '--text-pri':   '#e6edf3',
-        '--text-sec':   '#b1bac4',
-        '--text-muted': '#484f58',
-        '--text-dim':   '#30363d',
-        '--accent':     '#388bfd',
-        '--accent-hov': '#1f6feb',
-        '--tab-active': '#388bfd',
-        '--notice-bg':  'rgba(56,139,253,.1)',
-        '--notice-bd':  'rgba(56,139,253,.35)',
-        '--notice-txt': '#79c0ff',
-        '--overlay':    'rgba(0,0,0,.75)',
-        '--scrollbar':  '#21262d',
-      }
-    },
-    rose: {
-      name: 'Rose Gold',
-      vars: {
-        '--bg-modal':   '#1e1519',
-        '--bg-header':  '#17101x',
-        '--bg-box':     '#261a1f',
-        '--bg-input':   '#1a1015',
-        '--bg-item':    '#1a1015',
-        '--bg-log':     '#110b0e',
-        '--border':     '#3d2530',
-        '--border2':    '#2e1c25',
-        '--text-pri':   '#f5e6ea',
-        '--text-sec':   '#d4b8c0',
-        '--text-muted': '#7a5260',
-        '--text-dim':   '#4a2f3a',
-        '--accent':     '#e8619a',
-        '--accent-hov': '#d4437e',
-        '--tab-active': '#e8619a',
-        '--notice-bg':  'rgba(232,97,154,.1)',
-        '--notice-bd':  'rgba(232,97,154,.35)',
-        '--notice-txt': '#f4a8c7',
-        '--overlay':    'rgba(0,0,0,.65)',
-        '--scrollbar':  '#3d2530',
-      }
-    },
-    forest: {
-      name: 'Forest Green',
-      vars: {
-        '--bg-modal':   '#131a14',
-        '--bg-header':  '#0e140f',
-        '--bg-box':     '#1a2419',
-        '--bg-input':   '#111a12',
-        '--bg-item':    '#111a12',
-        '--bg-log':     '#0a1009',
-        '--border':     '#253826',
-        '--border2':    '#1c2a1d',
-        '--text-pri':   '#e8f5e9',
-        '--text-sec':   '#b5cbb7',
-        '--text-muted': '#4a7050',
-        '--text-dim':   '#2d4a30',
-        '--accent':     '#4caf50',
-        '--accent-hov': '#388e3c',
-        '--tab-active': '#4caf50',
-        '--notice-bg':  'rgba(76,175,80,.1)',
-        '--notice-bd':  'rgba(76,175,80,.35)',
-        '--notice-txt': '#a5d6a7',
-        '--overlay':    'rgba(0,0,0,.65)',
-        '--scrollbar':  '#253826',
-      }
-    },
-    light: {
-      name: 'Light',
-      vars: {
-        '--bg-modal':   '#ffffff',
-        '--bg-header':  '#f0f2f5',
-        '--bg-box':     '#f7f8fa',
-        '--bg-input':   '#ffffff',
-        '--bg-item':    '#ffffff',
-        '--bg-log':     '#f0f2f5',
-        '--border':     '#dde1e7',
-        '--border2':    '#e4e7ec',
-        '--text-pri':   '#1a1d23',
-        '--text-sec':   '#3a3f4a',
-        '--text-muted': '#6b7280',
-        '--text-dim':   '#9ca3af',
-        '--accent':     '#1a73e8',
-        '--accent-hov': '#1260cc',
-        '--tab-active': '#1a73e8',
-        '--notice-bg':  'rgba(234,179,8,.08)',
-        '--notice-bd':  'rgba(234,179,8,.4)',
-        '--notice-txt': '#92600a',
-        '--overlay':    'rgba(0,0,0,.45)',
-        '--scrollbar':  '#dde1e7',
-      }
-    },
-    purple: {
-      name: 'Purple Haze',
-      vars: {
-        '--bg-modal':   '#1a1525',
-        '--bg-header':  '#130f1d',
-        '--bg-box':     '#221c30',
-        '--bg-input':   '#160f22',
-        '--bg-item':    '#160f22',
-        '--bg-log':     '#0e0a18',
-        '--border':     '#342550',
-        '--border2':    '#271c3d',
-        '--text-pri':   '#f0eaff',
-        '--text-sec':   '#c4b5e8',
-        '--text-muted': '#7860a8',
-        '--text-dim':   '#4a3570',
-        '--accent':     '#a855f7',
-        '--accent-hov': '#9333ea',
-        '--tab-active': '#a855f7',
-        '--notice-bg':  'rgba(168,85,247,.1)',
-        '--notice-bd':  'rgba(168,85,247,.35)',
-        '--notice-txt': '#d8b4fe',
-        '--overlay':    'rgba(0,0,0,.7)',
-        '--scrollbar':  '#342550',
-      }
-    }
+    dark:     { name: 'Dark',        accent: '#1a73e8', vars: { '--bg-modal':'#1c1e24','--bg-header':'#15171c','--bg-box':'#22242b','--bg-input':'#18191f','--bg-log':'#121318','--border':'#2b2d36','--border2':'#25272e','--text-pri':'#eaecf0','--text-sec':'#c9cdd4','--text-muted':'#555c6b','--text-dim':'#3e4351','--accent':'#1a73e8','--accent-hov':'#1260cc','--tab-active':'#1a73e8','--notice-bg':'rgba(234,179,8,.1)','--notice-bd':'rgba(234,179,8,.35)','--notice-txt':'#fde047','--scrollbar':'#2e3039','--fab-bg':'#1a73e8','--fab-hov':'#1260cc','--fab-txt':'#fff' } },
+    midnight: { name: 'Midnight',    accent: '#388bfd', vars: { '--bg-modal':'#0d1117','--bg-header':'#090d13','--bg-box':'#161b22','--bg-input':'#0d1117','--bg-log':'#070a0f','--border':'#21262d','--border2':'#161b22','--text-pri':'#e6edf3','--text-sec':'#b1bac4','--text-muted':'#484f58','--text-dim':'#30363d','--accent':'#388bfd','--accent-hov':'#1f6feb','--tab-active':'#388bfd','--notice-bg':'rgba(56,139,253,.1)','--notice-bd':'rgba(56,139,253,.35)','--notice-txt':'#79c0ff','--scrollbar':'#21262d','--fab-bg':'#388bfd','--fab-hov':'#1f6feb','--fab-txt':'#fff' } },
+    rose:     { name: 'Rose Gold',   accent: '#e8619a', vars: { '--bg-modal':'#1e1519','--bg-header':'#17101a','--bg-box':'#261a1f','--bg-input':'#1a1015','--bg-log':'#110b0e','--border':'#3d2530','--border2':'#2e1c25','--text-pri':'#f5e6ea','--text-sec':'#d4b8c0','--text-muted':'#7a5260','--text-dim':'#4a2f3a','--accent':'#e8619a','--accent-hov':'#d4437e','--tab-active':'#e8619a','--notice-bg':'rgba(232,97,154,.1)','--notice-bd':'rgba(232,97,154,.35)','--notice-txt':'#f4a8c7','--scrollbar':'#3d2530','--fab-bg':'#e8619a','--fab-hov':'#d4437e','--fab-txt':'#fff' } },
+    forest:   { name: 'Forest',      accent: '#4caf50', vars: { '--bg-modal':'#131a14','--bg-header':'#0e140f','--bg-box':'#1a2419','--bg-input':'#111a12','--bg-log':'#0a1009','--border':'#253826','--border2':'#1c2a1d','--text-pri':'#e8f5e9','--text-sec':'#b5cbb7','--text-muted':'#4a7050','--text-dim':'#2d4a30','--accent':'#4caf50','--accent-hov':'#388e3c','--tab-active':'#4caf50','--notice-bg':'rgba(76,175,80,.1)','--notice-bd':'rgba(76,175,80,.35)','--notice-txt':'#a5d6a7','--scrollbar':'#253826','--fab-bg':'#4caf50','--fab-hov':'#388e3c','--fab-txt':'#fff' } },
+    light:    { name: 'Light',       accent: '#1a73e8', vars: { '--bg-modal':'#ffffff','--bg-header':'#f0f2f5','--bg-box':'#f7f8fa','--bg-input':'#ffffff','--bg-log':'#f0f2f5','--border':'#dde1e7','--border2':'#e4e7ec','--text-pri':'#1a1d23','--text-sec':'#3a3f4a','--text-muted':'#6b7280','--text-dim':'#9ca3af','--accent':'#1a73e8','--accent-hov':'#1260cc','--tab-active':'#1a73e8','--notice-bg':'rgba(234,179,8,.08)','--notice-bd':'rgba(234,179,8,.4)','--notice-txt':'#92600a','--scrollbar':'#dde1e7','--fab-bg':'#1a73e8','--fab-hov':'#1260cc','--fab-txt':'#fff' } },
+    purple:   { name: 'Purple Haze', accent: '#a855f7', vars: { '--bg-modal':'#1a1525','--bg-header':'#130f1d','--bg-box':'#221c30','--bg-input':'#160f22','--bg-log':'#0e0a18','--border':'#342550','--border2':'#271c3d','--text-pri':'#f0eaff','--text-sec':'#c4b5e8','--text-muted':'#7860a8','--text-dim':'#4a3570','--accent':'#a855f7','--accent-hov':'#9333ea','--tab-active':'#a855f7','--notice-bg':'rgba(168,85,247,.1)','--notice-bd':'rgba(168,85,247,.35)','--notice-txt':'#d8b4fe','--scrollbar':'#342550','--fab-bg':'#a855f7','--fab-hov':'#9333ea','--fab-txt':'#fff' } },
   };
 
   const FAB_ICONS = {
-    arrow:   `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`,
-    trade:   `<svg viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`,
-    star:    `<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`,
-    bolt:    `<svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11L10 22l9-11.5H13.5L13 2z"/></svg>`,
-    gift:    `<svg viewBox="0 0 24 24"><path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7m0 0a3 3 0 0 0-3-3 2 2 0 0 0 0 4h3zm0 0a3 3 0 0 1 3-3 2 2 0 0 1 0 4h-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`,
-    korone:  `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 14s1.5 2 4 2 4-2 4-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="9" cy="10" r="1.5"/><circle cx="15" cy="10" r="1.5"/></svg>`,
+    arrow:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>',
+    trade:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>',
+    star:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
+    bolt:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11L10 22l9-11.5H13.5L13 2z"/></svg>',
+    gift:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7m0 0a3 3 0 0 0-3-3 2 2 0 0 0 0 4h3zm0 0a3 3 0 0 1 3-3 2 2 0 0 1 0 4h-3z"/></svg>',
+    korone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2" stroke-linecap="round"/><circle cx="9" cy="10" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1.5" fill="currentColor" stroke="none"/></svg>',
   };
 
-  let currentTheme = GM_getValue('theme', 'dark');
+  let currentTheme   = GM_getValue('theme', 'dark');
   let currentFabIcon = GM_getValue('fabIcon', 'arrow');
 
-  function applyTheme(themeKey) {
-    const theme = THEMES[themeKey] || THEMES.dark;
-    const root = document.getElementById('pt-modal');
-    if (!root) return;
-    Object.entries(theme.vars).forEach(([k, v]) => root.style.setProperty(k, v));
-    // overlay bg
-    const ov = document.getElementById('pt-overlay');
-    if (ov) ov.style.setProperty('--overlay', theme.vars['--overlay']);
-    currentTheme = themeKey;
-    GM_setValue('theme', themeKey);
+  // ─── FAB POSITION ────────────────────────
+  let fabPos = null;
+  try { fabPos = JSON.parse(GM_getValue('fabPos2', 'null')); } catch(e) { fabPos = null; }
+
+  function applyTheme(key) {
+    const theme = THEMES[key] || THEMES.dark;
+    const modal = document.getElementById('pt-modal');
+    if (modal) Object.entries(theme.vars).forEach(function(kv) { modal.style.setProperty(kv[0], kv[1]); });
+    // update FAB colors
+    const fab = document.getElementById('pt-fab');
+    if (fab) {
+      fab.style.background = theme.vars['--fab-bg'];
+      fab.style.color      = theme.vars['--fab-txt'];
+      fab.dataset.hov      = theme.vars['--fab-hov'];
+    }
+    currentTheme = key;
+    GM_setValue('theme', key);
   }
 
-  // Update sidebar icon when icon setting changes
-  function applyFabIcon(iconKey) {
-    // update hidden fab
-    const fab = document.getElementById('pt-fab');
-    if (fab) fab.innerHTML = FAB_ICONS[iconKey] || FAB_ICONS.arrow;
-    // update sidebar button icon
-    const sideIcon = document.querySelector('#pt-sidebar-btn .pt-fab-icon');
-    if (sideIcon) sideIcon.innerHTML = FAB_ICONS[iconKey] || FAB_ICONS.arrow;
-    currentFabIcon = iconKey;
-    GM_setValue('fabIcon', iconKey);
+  function applyFabIcon(key) {
+    var svg = FAB_ICONS[key] || FAB_ICONS.arrow;
+    var fab = document.getElementById('pt-fab');
+    if (fab) {
+      var lbl = fab.querySelector('.pt-fab-lbl');
+      fab.innerHTML = '<span class="pt-fab-icn">' + svg + '</span><span class="pt-fab-lbl">' + (lbl ? lbl.textContent : 'Trading Tool') + '</span>';
+    }
+    var sideIcn = document.querySelector('#pt-sidebar-entry .pt-sbi-icn');
+    if (sideIcn) sideIcn.innerHTML = svg;
+    currentFabIcon = key;
+    GM_setValue('fabIcon', key);
   }
 
   // ─── CSS ─────────────────────────────────
-  const style = document.createElement('style');
-  style.textContent = `
-    #pt-fab{display:none!important}
-    #pt-sidebar-btn{display:block;width:100%;background:none;border:none;padding:0;cursor:pointer;text-align:left;}
-    #pt-sidebar-btn .wrapper-0-2-92{transition:background .15s}
-    #pt-sidebar-btn:hover .wrapper-0-2-92{background:rgba(255,255,255,.05)}
-    #pt-sidebar-btn .pt-fab-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:4px;vertical-align:middle;flex-shrink:0;opacity:0.85}
-    #pt-sidebar-btn .pt-fab-icon svg{width:15px;height:15px;fill:none;stroke:#9da0b3;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-    #pt-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999999;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .18s}
-    #pt-overlay.open{opacity:1;pointer-events:all}
-    #pt-modal{
-      --bg-modal:#1c1e24;--bg-header:#15171c;--bg-box:#22242b;--bg-input:#18191f;--bg-item:#18191f;--bg-log:#121318;
-      --border:#2b2d36;--border2:#25272e;--text-pri:#eaecf0;--text-sec:#c9cdd4;--text-muted:#555c6b;--text-dim:#3e4351;
-      --accent:#1a73e8;--accent-hov:#1260cc;--tab-active:#1a73e8;
-      --notice-bg:rgba(234,179,8,.1);--notice-bd:rgba(234,179,8,.35);--notice-txt:#fde047;
-      --overlay:rgba(0,0,0,.6);--scrollbar:#2e3039;
-      width:700px;max-width:96vw;max-height:88vh;background:var(--bg-modal);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 80px rgba(0,0,0,.75);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;color:var(--text-sec);transform:translateY(12px) scale(.98);transition:transform .18s;position:absolute;
-    }
-    #pt-overlay.open #pt-modal{transform:translateY(0) scale(1)}
-    #pt-header{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:var(--bg-header);border-bottom:1px solid var(--border2);flex-shrink:0;cursor:grab;user-select:none}
-    #pt-header:active{cursor:grabbing}
-    #pt-title{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;color:var(--text-pri)}
-    #pt-title svg{width:17px;height:17px;fill:var(--accent);flex-shrink:0}
-    #pt-close{background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1;padding:2px 5px;border-radius:4px;transition:color .15s,background .15s}
-    #pt-close:hover{color:var(--text-pri);background:var(--border)}
-    #pt-tabs{display:flex;background:var(--bg-header);border-bottom:1px solid var(--border2);flex-shrink:0;overflow-x:auto}
-    #pt-tabs::-webkit-scrollbar{display:none}
-    .pt-tab{padding:11px 18px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
-    .pt-tab:hover{color:var(--text-sec)}.pt-tab.active{color:var(--tab-active);border-bottom-color:var(--tab-active)}
-    #pt-body{overflow-y:auto;flex:1;min-height:0}
-    #pt-body::-webkit-scrollbar{width:5px}
-    #pt-body::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:3px}
-    .pt-pane{display:none;padding:16px 18px}.pt-pane.active{display:block}
-    .pt-notice{background:var(--notice-bg);border:1px solid var(--notice-bd);border-radius:6px;padding:10px 13px;color:var(--notice-txt);font-size:12px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-    .pt-box{background:var(--bg-box);border:1px solid var(--border);border-radius:6px;padding:14px 14px 12px;margin-bottom:12px}
-    .pt-box-title{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-muted);margin-bottom:11px}
-    .pt-box-title em{color:var(--accent);font-style:normal;font-weight:700}
-    .pt-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 15px;border:none;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:background .15s,opacity .15s;white-space:nowrap}
-    .pt-btn:disabled{opacity:.35;cursor:not-allowed}
-    .pt-btn-blue{background:var(--accent);color:#fff}.pt-btn-blue:hover:not(:disabled){background:var(--accent-hov)}
-    .pt-btn-green{background:#1a8f4a;color:#fff}.pt-btn-green:hover:not(:disabled){background:#177a3f}
-    .pt-btn-red{background:#c0392b;color:#fff}.pt-btn-red:hover:not(:disabled){background:#a93226}
-    .pt-btn-dark{background:var(--bg-input);color:var(--text-sec);border:1px solid var(--border)}.pt-btn-dark:hover:not(:disabled){background:var(--border)}
-    .pt-btn-w{width:100%}
-    .pt-input{background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:8px 11px;color:var(--text-pri);font-family:inherit;font-size:13px;outline:none;width:100%;box-sizing:border-box;transition:border-color .15s}
-    .pt-input:focus{border-color:var(--accent)}.pt-input::placeholder{color:var(--text-dim)}
-    #pt-inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:7px;max-height:175px;overflow-y:auto;margin-top:10px}
-    #pt-inv-grid::-webkit-scrollbar{width:4px}
-    #pt-inv-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-    .pt-iitem{background:var(--bg-item);border:2px solid var(--border);border-radius:6px;padding:6px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}
-    .pt-iitem:hover{border-color:var(--accent);background:var(--bg-box)}.pt-iitem.sel{border-color:var(--accent);background:var(--bg-box)}
-    .pt-iitem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:3px;background:var(--bg-box);object-fit:cover}
-    .pt-iitem-n{font-size:9px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .pt-iitem-v{font-size:9px;color:var(--accent);font-weight:700}
-    .pt-cat-row{display:flex;gap:8px;margin-bottom:10px}
-    #pt-cat-sort{background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:8px 10px;color:var(--text-pri);font-family:inherit;font-size:13px;outline:none;cursor:pointer;flex-shrink:0}
-    #pt-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:7px;max-height:230px;overflow-y:auto}
-    #pt-cat-grid::-webkit-scrollbar{width:4px}
-    #pt-cat-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-    .pt-citem{background:var(--bg-item);border:2px solid var(--border);border-radius:6px;padding:7px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}
-    .pt-citem:hover{border-color:var(--accent);background:var(--bg-box)}.pt-citem.sel{border-color:var(--accent);background:var(--bg-box)}
-    .pt-citem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:4px;background:var(--bg-box);object-fit:cover}
-    .pt-citem-n{font-size:9px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .pt-citem-v{font-size:9px;color:var(--accent);font-weight:700}.pt-citem-r{font-size:9px;color:var(--text-muted)}
-    #pt-target-preview{display:none;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:10px}
-    #pt-target-preview.vis{display:flex}
-    #pt-target-preview img{width:46px;height:46px;border-radius:5px;background:var(--bg-box)}
-    #pt-tgt-name{font-weight:600;color:var(--text-pri);font-size:13px;margin-bottom:2px}
-    #pt-tgt-stats{font-size:11px;color:var(--text-muted)}
-    #pt-tgt-stats span{color:var(--accent);font-weight:600}
-    .pt-ctrl-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-    .pt-ctrl-lbl{font-size:12px;color:var(--text-muted);white-space:nowrap}
-    .pt-stepper{display:flex;align-items:center;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;overflow:hidden}
-    .pt-step-btn{width:28px;height:28px;background:none;border:none;color:var(--text-sec);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:background .12s}
-    .pt-step-btn:hover{background:var(--border)}
-    .pt-step-v{min-width:38px;text-align:center;font-size:12px;font-weight:600;color:var(--text-pri);border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 5px;height:28px;line-height:28px}
-    .pt-prog-wrap{margin-bottom:10px;display:none}
-    .pt-prog-bg{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:5px}
-    .pt-prog-fill{height:100%;border-radius:3px;width:0%;transition:width .3s ease}
-    .pt-prog-fill-blue{background:var(--accent)}.pt-prog-fill-red{background:#c0392b}
-    .pt-prog-row{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}
-    .pt-log{background:var(--bg-log);border:1px solid var(--border);border-radius:5px;padding:8px 10px;max-height:95px;overflow-y:auto;margin-bottom:10px;font-size:11px;font-family:'Consolas','Courier New',monospace;line-height:1.65;color:var(--text-muted)}
-    .pt-log::-webkit-scrollbar{width:3px}
-    .pt-log::-webkit-scrollbar-thumb{background:var(--border)}
-    .pt-ok{color:#4ade80}.pt-err{color:#f87171}.pt-info{color:#60a5fa}
-    .pt-lk-result{display:none;align-items:center;gap:12px;background:var(--bg-item);border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:10px}
-    .pt-lk-result.vis{display:flex}
-    .pt-lk-result img{width:54px;height:54px;border-radius:5px;background:var(--bg-box)}
-    .pt-lk-name{font-weight:600;color:var(--text-pri);font-size:14px;margin-bottom:4px}
-    .pt-lk-stats{font-size:12px;color:var(--text-muted);line-height:1.8}
-    .pt-lk-stats b{color:var(--text-sec)}
-    .dem{font-weight:700}.dem-hi{color:#4ade80}.dem-lo{color:#f87171}.dem-n{color:#60a5fa}.dem-u{color:var(--text-muted)}
-    .pt-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.2);border-radius:4px;padding:3px 8px;font-size:11px;color:#f87171;margin:3px}
-    .pt-chip-rm{cursor:pointer}.pt-chip-rm:hover{color:#fff}
-    #pt-trades-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow-y:auto;margin-top:10px}
-    #pt-trades-list::-webkit-scrollbar{width:4px}
-    #pt-trades-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-    .pt-trade-row{display:flex;align-items:center;gap:10px;background:var(--bg-item);border:1px solid var(--border);border-radius:6px;padding:9px 11px;transition:border-color .12s,opacity .2s;cursor:pointer}
-    .pt-trade-row:hover{border-color:var(--border)}
-    .pt-trade-row.sel{border-color:#c0392b;background:rgba(192,57,43,.08)}
-    .pt-trade-row.gone{opacity:.25;pointer-events:none}
-    .pt-trade-check{width:15px;height:15px;accent-color:#c0392b;cursor:pointer;flex-shrink:0}
-    .pt-trade-partner{font-size:12px;font-weight:600;color:var(--text-pri);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .pt-trade-meta{font-size:10px;color:var(--text-muted);flex-shrink:0;white-space:nowrap}
-    .pt-trade-id{font-size:10px;color:var(--border);font-family:monospace;flex-shrink:0}
-    .pt-sel-bar{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-muted)}
-    .pt-sel-bar input{width:15px;height:15px;accent-color:#c0392b;cursor:pointer}
-    .pt-sel-bar label{cursor:pointer;user-select:none}
-
-    /* ── Theme / Icon Picker ── */
-    .pt-theme-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px}
-    .pt-theme-card{background:var(--bg-input);border:2px solid var(--border);border-radius:7px;padding:10px 8px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;font-size:11px;color:var(--text-sec)}
-    .pt-theme-card:hover{border-color:var(--accent)}
-    .pt-theme-card.active-theme{border-color:var(--accent);background:var(--bg-box)}
-    .pt-theme-swatch{width:100%;height:22px;border-radius:4px;margin-bottom:6px}
-    .pt-icon-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:4px}
-    .pt-icon-btn{background:var(--bg-input);border:2px solid var(--border);border-radius:8px;width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .15s,background .15s;color:var(--text-sec)}
-    .pt-icon-btn:hover{border-color:var(--accent)}
-    .pt-icon-btn.active-icon{border-color:var(--accent);background:var(--bg-box);color:var(--accent)}
-    .pt-icon-btn svg{width:18px;height:18px;fill:currentColor}
-  `;
+  var style = document.createElement('style');
+  style.textContent = [
+    // FAB — rectangle, theme-colored, draggable
+    '#pt-fab{position:fixed;z-index:999998;display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:34px;border-radius:6px;border:none;cursor:pointer;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;font-weight:700;letter-spacing:.3px;box-shadow:0 3px 14px rgba(0,0,0,.45);user-select:none;transition:box-shadow .15s,filter .15s;white-space:nowrap}',
+    '#pt-fab:hover{filter:brightness(1.12);box-shadow:0 5px 18px rgba(0,0,0,.55)}',
+    '#pt-fab .pt-fab-icn{display:flex;align-items:center;flex-shrink:0}',
+    '#pt-fab .pt-fab-icn svg{width:14px;height:14px;fill:currentColor;stroke:currentColor}',
+    '#pt-fab .pt-fab-lbl{pointer-events:none}',
+    // Modal / overlay
+    '#pt-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999999;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .18s}',
+    '#pt-overlay.open{opacity:1;pointer-events:all}',
+    '#pt-modal{--bg-modal:#1c1e24;--bg-header:#15171c;--bg-box:#22242b;--bg-input:#18191f;--bg-log:#121318;--border:#2b2d36;--border2:#25272e;--text-pri:#eaecf0;--text-sec:#c9cdd4;--text-muted:#555c6b;--text-dim:#3e4351;--accent:#1a73e8;--accent-hov:#1260cc;--tab-active:#1a73e8;--notice-bg:rgba(234,179,8,.1);--notice-bd:rgba(234,179,8,.35);--notice-txt:#fde047;--scrollbar:#2e3039;width:700px;max-width:96vw;max-height:88vh;background:var(--bg-modal);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 80px rgba(0,0,0,.75);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--text-sec);position:absolute;transform:translateY(12px) scale(.98);transition:transform .18s}',
+    '#pt-overlay.open #pt-modal{transform:translateY(0) scale(1)}',
+    '#pt-header{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:var(--bg-header);border-bottom:1px solid var(--border2);flex-shrink:0;cursor:grab;user-select:none}',
+    '#pt-header:active{cursor:grabbing}',
+    '#pt-title{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;color:var(--text-pri)}',
+    '#pt-title svg{width:17px;height:17px;fill:var(--accent);flex-shrink:0}',
+    '#pt-close{background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1;padding:2px 5px;border-radius:4px;transition:color .15s,background .15s}',
+    '#pt-close:hover{color:var(--text-pri);background:var(--border)}',
+    '#pt-tabs{display:flex;background:var(--bg-header);border-bottom:1px solid var(--border2);flex-shrink:0;overflow-x:auto}',
+    '#pt-tabs::-webkit-scrollbar{display:none}',
+    '.pt-tab{padding:11px 18px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}',
+    '.pt-tab:hover{color:var(--text-sec)}.pt-tab.active{color:var(--tab-active);border-bottom-color:var(--tab-active)}',
+    '#pt-body{overflow-y:auto;flex:1;min-height:0}',
+    '#pt-body::-webkit-scrollbar{width:5px}',
+    '#pt-body::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:3px}',
+    '.pt-pane{display:none;padding:16px 18px}.pt-pane.active{display:block}',
+    '.pt-notice{background:var(--notice-bg);border:1px solid var(--notice-bd);border-radius:6px;padding:10px 13px;color:var(--notice-txt);font-size:12px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}',
+    '.pt-box{background:var(--bg-box);border:1px solid var(--border);border-radius:6px;padding:14px 14px 12px;margin-bottom:12px}',
+    '.pt-box-title{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-muted);margin-bottom:11px}',
+    '.pt-box-title em{color:var(--accent);font-style:normal;font-weight:700}',
+    '.pt-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 15px;border:none;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:background .15s,opacity .15s;white-space:nowrap}',
+    '.pt-btn:disabled{opacity:.35;cursor:not-allowed}',
+    '.pt-btn-blue{background:var(--accent);color:#fff}.pt-btn-blue:hover:not(:disabled){background:var(--accent-hov)}',
+    '.pt-btn-green{background:#1a8f4a;color:#fff}.pt-btn-green:hover:not(:disabled){background:#177a3f}',
+    '.pt-btn-red{background:#c0392b;color:#fff}.pt-btn-red:hover:not(:disabled){background:#a93226}',
+    '.pt-btn-dark{background:var(--bg-input);color:var(--text-sec);border:1px solid var(--border)}.pt-btn-dark:hover:not(:disabled){background:var(--border)}',
+    '.pt-btn-w{width:100%}',
+    '.pt-input{background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:8px 11px;color:var(--text-pri);font-family:inherit;font-size:13px;outline:none;width:100%;box-sizing:border-box;transition:border-color .15s}',
+    '.pt-input:focus{border-color:var(--accent)}.pt-input::placeholder{color:var(--text-dim)}',
+    '#pt-inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:7px;max-height:175px;overflow-y:auto;margin-top:10px}',
+    '#pt-inv-grid::-webkit-scrollbar{width:4px}',
+    '#pt-inv-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}',
+    '.pt-iitem{background:var(--bg-input);border:2px solid var(--border);border-radius:6px;padding:6px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}',
+    '.pt-iitem:hover,.pt-iitem.sel{border-color:var(--accent);background:var(--bg-box)}',
+    '.pt-iitem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:3px;background:var(--bg-box);object-fit:cover}',
+    '.pt-iitem-n{font-size:9px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.pt-iitem-v{font-size:9px;color:var(--accent);font-weight:700}',
+    '.pt-cat-row{display:flex;gap:8px;margin-bottom:10px}',
+    '#pt-cat-sort{background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:8px 10px;color:var(--text-pri);font-family:inherit;font-size:13px;outline:none;cursor:pointer;flex-shrink:0}',
+    '#pt-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:7px;max-height:230px;overflow-y:auto}',
+    '#pt-cat-grid::-webkit-scrollbar{width:4px}',
+    '#pt-cat-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}',
+    '.pt-citem{background:var(--bg-input);border:2px solid var(--border);border-radius:6px;padding:7px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s}',
+    '.pt-citem:hover,.pt-citem.sel{border-color:var(--accent);background:var(--bg-box)}',
+    '.pt-citem img{width:100%;aspect-ratio:1;border-radius:4px;display:block;margin-bottom:4px;background:var(--bg-box);object-fit:cover}',
+    '.pt-citem-n{font-size:9px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.pt-citem-v{font-size:9px;color:var(--accent);font-weight:700}.pt-citem-r{font-size:9px;color:var(--text-muted)}',
+    '#pt-target-preview{display:none;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:10px}',
+    '#pt-target-preview.vis{display:flex}',
+    '#pt-target-preview img{width:46px;height:46px;border-radius:5px;background:var(--bg-box)}',
+    '#pt-tgt-name{font-weight:600;color:var(--text-pri);font-size:13px;margin-bottom:2px}',
+    '#pt-tgt-stats{font-size:11px;color:var(--text-muted)}',
+    '#pt-tgt-stats span{color:var(--accent);font-weight:600}',
+    '.pt-ctrl-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}',
+    '.pt-ctrl-lbl{font-size:12px;color:var(--text-muted);white-space:nowrap}',
+    '.pt-stepper{display:flex;align-items:center;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;overflow:hidden}',
+    '.pt-step-btn{width:28px;height:28px;background:none;border:none;color:var(--text-sec);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:background .12s}',
+    '.pt-step-btn:hover{background:var(--border)}',
+    '.pt-step-v{min-width:38px;text-align:center;font-size:12px;font-weight:600;color:var(--text-pri);border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 5px;height:28px;line-height:28px}',
+    '.pt-prog-wrap{margin-bottom:10px;display:none}',
+    '.pt-prog-bg{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:5px}',
+    '.pt-prog-fill{height:100%;border-radius:3px;width:0%;transition:width .3s ease}',
+    '.pt-prog-fill-blue{background:var(--accent)}.pt-prog-fill-red{background:#c0392b}',
+    '.pt-prog-row{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}',
+    '.pt-log{background:var(--bg-log);border:1px solid var(--border);border-radius:5px;padding:8px 10px;max-height:95px;overflow-y:auto;margin-bottom:10px;font-size:11px;font-family:"Consolas","Courier New",monospace;line-height:1.65;color:var(--text-muted)}',
+    '.pt-log::-webkit-scrollbar{width:3px}',
+    '.pt-log::-webkit-scrollbar-thumb{background:var(--border)}',
+    '.pt-ok{color:#4ade80}.pt-err{color:#f87171}.pt-info{color:#60a5fa}',
+    '.pt-lk-result{display:none;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:10px}',
+    '.pt-lk-result.vis{display:flex}',
+    '.pt-lk-result img{width:54px;height:54px;border-radius:5px;background:var(--bg-box)}',
+    '.pt-lk-name{font-weight:600;color:var(--text-pri);font-size:14px;margin-bottom:4px}',
+    '.pt-lk-stats{font-size:12px;color:var(--text-muted);line-height:1.8}',
+    '.pt-lk-stats b{color:var(--text-sec)}',
+    '.dem{font-weight:700}.dem-hi{color:#4ade80}.dem-lo{color:#f87171}.dem-n{color:#60a5fa}.dem-u{color:var(--text-muted)}',
+    '.pt-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.2);border-radius:4px;padding:3px 8px;font-size:11px;color:#f87171;margin:3px}',
+    '.pt-chip-rm{cursor:pointer}.pt-chip-rm:hover{color:#fff}',
+    '#pt-trades-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow-y:auto;margin-top:10px}',
+    '#pt-trades-list::-webkit-scrollbar{width:4px}',
+    '#pt-trades-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}',
+    '.pt-trade-row{display:flex;align-items:center;gap:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:9px 11px;transition:border-color .12s,opacity .2s;cursor:pointer}',
+    '.pt-trade-row:hover{border-color:var(--text-dim)}',
+    '.pt-trade-row.sel{border-color:#c0392b;background:rgba(192,57,43,.08)}',
+    '.pt-trade-row.gone{opacity:.25;pointer-events:none}',
+    '.pt-trade-check{width:15px;height:15px;accent-color:#c0392b;cursor:pointer;flex-shrink:0}',
+    '.pt-trade-partner{font-size:12px;font-weight:600;color:var(--text-pri);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.pt-trade-meta{font-size:10px;color:var(--text-muted);flex-shrink:0;white-space:nowrap}',
+    '.pt-trade-id{font-size:10px;color:var(--border);font-family:monospace;flex-shrink:0}',
+    '.pt-sel-bar{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-muted)}',
+    '.pt-sel-bar input{width:15px;height:15px;accent-color:#c0392b;cursor:pointer}',
+    '.pt-sel-bar label{cursor:pointer;user-select:none}',
+    // Theme / icon picker
+    '.pt-theme-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px}',
+    '.pt-theme-card{background:var(--bg-input);border:2px solid var(--border);border-radius:7px;padding:10px 8px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;font-size:11px;color:var(--text-sec)}',
+    '.pt-theme-card:hover{border-color:var(--accent)}',
+    '.pt-theme-card.active-theme{border-color:var(--accent);background:var(--bg-box)}',
+    '.pt-theme-swatch{width:100%;height:22px;border-radius:4px;margin-bottom:6px}',
+    '.pt-icon-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:4px}',
+    '.pt-icon-btn{background:var(--bg-input);border:2px solid var(--border);border-radius:8px;width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .15s,background .15s;color:var(--text-sec)}',
+    '.pt-icon-btn:hover{border-color:var(--accent)}',
+    '.pt-icon-btn.active-icon{border-color:var(--accent);background:var(--bg-box);color:var(--accent)}',
+    '.pt-icon-btn svg{width:18px;height:18px;fill:currentColor;stroke:currentColor}',
+    // Sidebar entry
+    '#pt-sidebar-entry{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;margin:6px 8px 4px;transition:filter .15s;user-select:none;justify-content:flex-start}',
+    '#pt-sidebar-entry:hover{filter:brightness(1.15)}',
+    '#pt-sidebar-entry .pt-sbi-icn{display:flex;align-items:center;flex-shrink:0}',
+    '#pt-sidebar-entry .pt-sbi-icn svg{width:14px;height:14px;fill:currentColor;stroke:currentColor}',
+  ].join('');
   document.head.appendChild(style);
 
-  // ─── SIDEBAR BUTTON ──────────────────────
-  function injectSidebarBtn() {
-    // Find the sidebar card
-    const card = document.querySelector('.card-0-2-80');
-    if (!card) return false;
-    // Find the "Upgrade Now" button to insert before it (bottom of nav links)
-    const upgradeBtn = card.querySelector('a[href="/BuildersClub/Upgrade.ashx"]');
-
-    const a = document.createElement('a');
-    a.id = 'pt-sidebar-btn';
-    a.href = 'javascript:void(0)';
-    a.className = 'link-0-2-93';
-    a.style.color = 'inherit';
-    a.innerHTML = `
-      <div class="wrapper-0-2-92 hover-icon-nav-trade">
-        <p class="linkEntry-0-2-90">
-          <span class="pt-fab-icon">${FAB_ICONS[currentFabIcon]}</span>
-          <span class="name-0-2-91 name-d0-0-2-98">Trading Tool</span>
-        </p>
-      </div>`;
-    a.addEventListener('click', () => overlay.classList.add('open'));
-
-    if (upgradeBtn) card.insertBefore(a, upgradeBtn);
-    else card.appendChild(a);
-    return true;
-  }
-
-  // Retry injection in case sidebar loads after script
-  function trySidebarInject(attempts = 0) {
-    if (injectSidebarBtn()) return;
-    if (attempts < 20) setTimeout(() => trySidebarInject(attempts + 1), 300);
-  }
-
   // ─── HTML ─────────────────────────────────
-  const wrap = document.createElement('div');
-  wrap.innerHTML = `
-    <button id="pt-fab" title="Korone Trading Tool" style="display:none">
-      ${FAB_ICONS[currentFabIcon]}
-    </button>
-    <div id="pt-overlay">
-      <div id="pt-modal">
-        <div id="pt-header">
-          <div id="pt-title"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>Korone Trading Tool v2.2</div>
-          <button id="pt-close">×</button>
-        </div>
-        <div id="pt-tabs">
-          <div class="pt-tab active" data-pane="blast">Blast All Owners</div>
-          <div class="pt-tab" data-pane="cancel">Cancel Trades</div>
-          <div class="pt-tab" data-pane="lookup">Item / Player Lookup</div>
-          <div class="pt-tab" data-pane="settings">Settings</div>
-        </div>
-        <div id="pt-body">
-
-          <!-- BLAST -->
-          <div class="pt-pane active" id="pt-pane-blast">
-            <div class="pt-notice">ℹ️ We have switched from using Kolimons to Koromons API due to shutdown.</div>
-            <div class="pt-box">
-              <div class="pt-box-title">1. Your items to offer <em id="pt-offer-count">(0/4)</em></div>
-              <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-inv">Load My Inventory</button>
-              <div id="pt-inv-grid"><div style="color:var(--text-dim);font-size:12px;padding:6px 0">Click above to load your inventory</div></div>
-            </div>
-            <div class="pt-box">
-              <div class="pt-box-title">2. Target item <em id="pt-target-label"></em></div>
-              <div class="pt-cat-row">
-                <input class="pt-input" id="pt-cat-search" placeholder="Search item by name..." style="flex:1"/>
-                <select id="pt-cat-sort">
-                  <option value="val-d">Value ↓</option><option value="val-a">Value ↑</option>
-                  <option value="rap-d">RAP ↓</option><option value="rap-a">RAP ↑</option>
-                  <option value="name">Name A–Z</option>
-                </select>
-              </div>
-              <div id="pt-cat-grid"><div style="color:var(--text-dim);font-size:12px">Loading Koromons catalog...</div></div>
-              <div id="pt-target-preview">
-                <img id="pt-tgt-img" src="" onerror="this.src='https://koromons.xyz/logo.png'"/>
-                <div style="flex:1"><div id="pt-tgt-name"></div><div id="pt-tgt-stats"></div></div>
-                <button class="pt-btn pt-btn-dark" id="pt-find-owners">Find Owners</button>
-              </div>
-            </div>
-            <div class="pt-box">
-              <div class="pt-box-title">3. Blast trades</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-                Selected: <span id="pt-sel-rap" style="color:var(--accent);font-weight:600">0 RAP</span>,
-                <span id="pt-sel-val" style="color:var(--accent);font-weight:600">0 Value</span>
-                &nbsp;·&nbsp; Owners: <span id="pt-owners-n" style="color:var(--text-pri);font-weight:600">0</span>
-              </div>
-              <div class="pt-ctrl-row">
-                <span class="pt-ctrl-lbl">Max users:</span>
-                <div class="pt-stepper"><button class="pt-step-btn" id="pt-maxu-m">−</button><div class="pt-step-v" id="pt-maxu-v">All</div><button class="pt-step-btn" id="pt-maxu-p">+</button></div>
-                <button class="pt-btn pt-btn-dark" id="pt-maxcopy">Max Copies</button>
-                <span class="pt-ctrl-lbl" style="margin-left:auto">Delay:</span>
-                <div class="pt-stepper"><button class="pt-step-btn" id="pt-delay-m">−</button><div class="pt-step-v" id="pt-delay-v">5s</div><button class="pt-step-btn" id="pt-delay-p">+</button></div>
-              </div>
-              <div class="pt-prog-wrap" id="pt-prog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-blue" id="pt-prog-fill"></div></div><div class="pt-prog-row"><span id="pt-prog-status">Sending...</span><span id="pt-prog-count">0/0</span></div></div>
-              <div class="pt-log" id="pt-log"><span class="pt-info">// Ready.</span></div>
-              <div style="display:flex;gap:8px">
-                <button class="pt-btn pt-btn-green pt-btn-w" id="pt-send" disabled>Send All Trades</button>
-                <button class="pt-btn pt-btn-red" id="pt-stop" disabled style="min-width:76px">Stop</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- CANCEL TRADES -->
-          <div class="pt-pane" id="pt-pane-cancel">
-            <div class="pt-box">
-              <div class="pt-box-title">Outbound Trades <em id="pt-cancel-count">(none loaded)</em></div>
-              <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-trades" style="margin-bottom:12px">Load All Outbound Trades</button>
-              <div class="pt-sel-bar">
-                <input type="checkbox" id="pt-select-all"/>
-                <label for="pt-select-all">Select all</label>
-                <span style="margin-left:auto;color:var(--text-pri);font-weight:600;font-size:12px"><span id="pt-sel-trade-n">0</span> selected</span>
-              </div>
-              <div id="pt-trades-list"><div style="color:var(--text-dim);font-size:12px;padding:4px 0">Load your outbound trades above to get started.</div></div>
-            </div>
-            <div class="pt-box">
-              <div class="pt-box-title">Cancel Selected</div>
-              <div class="pt-ctrl-row" style="margin-bottom:12px">
-                <span class="pt-ctrl-lbl">Delay between cancels:</span>
-                <div class="pt-stepper"><button class="pt-step-btn" id="pt-cdelay-m">−</button><div class="pt-step-v" id="pt-cdelay-v">2s</div><button class="pt-step-btn" id="pt-cdelay-p">+</button></div>
-              </div>
-              <div class="pt-prog-wrap" id="pt-cprog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-red" id="pt-cprog-fill"></div></div><div class="pt-prog-row"><span id="pt-cprog-status">Cancelling...</span><span id="pt-cprog-count">0/0</span></div></div>
-              <div class="pt-log" id="pt-cancel-log"><span class="pt-info">// Select trades then hit Cancel Selected.</span></div>
-              <div style="display:flex;gap:8px">
-                <button class="pt-btn pt-btn-red pt-btn-w" id="pt-do-cancel" disabled>Cancel Selected</button>
-                <button class="pt-btn pt-btn-dark" id="pt-cancel-stop" disabled style="min-width:76px">Stop</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- LOOKUP -->
-          <div class="pt-pane" id="pt-pane-lookup">
-            <div class="pt-box">
-              <div class="pt-box-title">Item Lookup</div>
-              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-item-q" placeholder="Item name or asset ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-item-go">Search</button></div>
-              <div class="pt-lk-result" id="pt-lk-item-r"><img id="pt-lk-item-img" src="" onerror="this.src='https://koromons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-item-name"></div><div class="pt-lk-stats" id="pt-lk-item-stats"></div></div></div>
-            </div>
-            <div class="pt-box">
-              <div class="pt-box-title">Player Lookup</div>
-              <div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-user-q" placeholder="User ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-user-go">Search</button></div>
-              <div class="pt-lk-result" id="pt-lk-user-r"><img id="pt-lk-user-img" src="" style="border-radius:50%" onerror="this.src='https://koromons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-user-name"></div><div class="pt-lk-stats" id="pt-lk-user-stats"></div></div></div>
-            </div>
-          </div>
-
-          <!-- SETTINGS -->
-          <div class="pt-pane" id="pt-pane-settings">
-
-            <!-- THEME PICKER -->
-            <div class="pt-box">
-              <div class="pt-box-title">Theme</div>
-              <div class="pt-theme-grid" id="pt-theme-grid"></div>
-            </div>
-
-            <!-- FAB ICON PICKER -->
-            <div class="pt-box">
-              <div class="pt-box-title">Button Icon</div>
-              <div class="pt-icon-grid" id="pt-icon-grid"></div>
-            </div>
-
-            <div class="pt-box">
-              <div class="pt-box-title">Blacklisted Users</div>
-              <div style="display:flex;gap:8px;margin-bottom:10px"><input class="pt-input" id="pt-bl-q" placeholder="User ID or username..." style="flex:1"/><button class="pt-btn pt-btn-red" id="pt-bl-add">Block</button></div>
-              <div id="pt-bl-list" style="min-height:22px"></div>
-            </div>
-            <div class="pt-box">
-              <div class="pt-box-title">Rate Limit Backoff</div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:12px;color:var(--text-muted)">Base wait time</span>
-                <div class="pt-stepper"><button class="pt-step-btn" id="pt-bo-m">−</button><div class="pt-step-v" id="pt-bo-v">15s</div><button class="pt-step-btn" id="pt-bo-p">+</button></div>
-              </div>
-              <div style="font-size:11px;color:var(--text-dim);line-height:1.7">On each rate limit hit: waits <b style="color:var(--text-muted)">base × 2^n</b> before retrying.<br/>15s → 30s → 60s → 120s → ...</div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>`;
+  var wrap = document.createElement('div');
+  wrap.innerHTML = [
+    '<button id="pt-fab">',
+    '  <span class="pt-fab-icn">' + FAB_ICONS[currentFabIcon] + '</span>',
+    '  <span class="pt-fab-lbl">Trading Tool</span>',
+    '</button>',
+    '<div id="pt-overlay">',
+    '  <div id="pt-modal">',
+    '    <div id="pt-header">',
+    '      <div id="pt-title"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>Korone Trading Tool v2.3</div>',
+    '      <button id="pt-close">\xD7</button>',
+    '    </div>',
+    '    <div id="pt-tabs">',
+    '      <div class="pt-tab active" data-pane="blast">Blast All Owners</div>',
+    '      <div class="pt-tab" data-pane="cancel">Cancel Trades</div>',
+    '      <div class="pt-tab" data-pane="lookup">Item / Player Lookup</div>',
+    '      <div class="pt-tab" data-pane="settings">Settings</div>',
+    '    </div>',
+    '    <div id="pt-body">',
+    // BLAST
+    '      <div class="pt-pane active" id="pt-pane-blast">',
+    '        <div class="pt-notice">\u2139\uFE0F We have switched from using Kolimons to Koromons API due to shutdown.</div>',
+    '        <div class="pt-box">',
+    '          <div class="pt-box-title">1. Your items to offer <em id="pt-offer-count">(0/4)</em></div>',
+    '          <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-inv">Load My Inventory</button>',
+    '          <div id="pt-inv-grid"><div style="color:var(--text-dim);font-size:12px;padding:6px 0">Click above to load your inventory</div></div>',
+    '        </div>',
+    '        <div class="pt-box">',
+    '          <div class="pt-box-title">2. Target item <em id="pt-target-label"></em></div>',
+    '          <div class="pt-cat-row"><input class="pt-input" id="pt-cat-search" placeholder="Search item by name..." style="flex:1"/><select id="pt-cat-sort"><option value="val-d">Value \u2193</option><option value="val-a">Value \u2191</option><option value="rap-d">RAP \u2193</option><option value="rap-a">RAP \u2191</option><option value="name">Name A\u2013Z</option></select></div>',
+    '          <div id="pt-cat-grid"><div style="color:var(--text-dim);font-size:12px">Loading Koromons catalog...</div></div>',
+    '          <div id="pt-target-preview"><img id="pt-tgt-img" src="" onerror="this.src=\'https://koromons.xyz/logo.png\'"/><div style="flex:1"><div id="pt-tgt-name"></div><div id="pt-tgt-stats"></div></div><button class="pt-btn pt-btn-dark" id="pt-find-owners">Find Owners</button></div>',
+    '        </div>',
+    '        <div class="pt-box">',
+    '          <div class="pt-box-title">3. Blast trades</div>',
+    '          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Selected: <span id="pt-sel-rap" style="color:var(--accent);font-weight:600">0 RAP</span>, <span id="pt-sel-val" style="color:var(--accent);font-weight:600">0 Value</span> &nbsp;\xB7&nbsp; Owners: <span id="pt-owners-n" style="color:var(--text-pri);font-weight:600">0</span></div>',
+    '          <div class="pt-ctrl-row"><span class="pt-ctrl-lbl">Max users:</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-maxu-m">\u2212</button><div class="pt-step-v" id="pt-maxu-v">All</div><button class="pt-step-btn" id="pt-maxu-p">+</button></div><button class="pt-btn pt-btn-dark" id="pt-maxcopy">Max Copies</button><span class="pt-ctrl-lbl" style="margin-left:auto">Delay:</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-delay-m">\u2212</button><div class="pt-step-v" id="pt-delay-v">5s</div><button class="pt-step-btn" id="pt-delay-p">+</button></div></div>',
+    '          <div class="pt-prog-wrap" id="pt-prog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-blue" id="pt-prog-fill"></div></div><div class="pt-prog-row"><span id="pt-prog-status">Sending...</span><span id="pt-prog-count">0/0</span></div></div>',
+    '          <div class="pt-log" id="pt-log"><span class="pt-info">// Ready.</span></div>',
+    '          <div style="display:flex;gap:8px"><button class="pt-btn pt-btn-green pt-btn-w" id="pt-send" disabled>Send All Trades</button><button class="pt-btn pt-btn-red" id="pt-stop" disabled style="min-width:76px">Stop</button></div>',
+    '        </div>',
+    '      </div>',
+    // CANCEL
+    '      <div class="pt-pane" id="pt-pane-cancel">',
+    '        <div class="pt-box">',
+    '          <div class="pt-box-title">Outbound Trades <em id="pt-cancel-count">(none loaded)</em></div>',
+    '          <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-trades" style="margin-bottom:12px">Load All Outbound Trades</button>',
+    '          <div class="pt-sel-bar"><input type="checkbox" id="pt-select-all"/><label for="pt-select-all">Select all</label><span style="margin-left:auto;color:var(--text-pri);font-weight:600;font-size:12px"><span id="pt-sel-trade-n">0</span> selected</span></div>',
+    '          <div id="pt-trades-list"><div style="color:var(--text-dim);font-size:12px;padding:4px 0">Load your outbound trades above to get started.</div></div>',
+    '        </div>',
+    '        <div class="pt-box">',
+    '          <div class="pt-box-title">Cancel Selected</div>',
+    '          <div class="pt-ctrl-row" style="margin-bottom:12px"><span class="pt-ctrl-lbl">Delay between cancels:</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-cdelay-m">\u2212</button><div class="pt-step-v" id="pt-cdelay-v">2s</div><button class="pt-step-btn" id="pt-cdelay-p">+</button></div></div>',
+    '          <div class="pt-prog-wrap" id="pt-cprog-wrap"><div class="pt-prog-bg"><div class="pt-prog-fill pt-prog-fill-red" id="pt-cprog-fill"></div></div><div class="pt-prog-row"><span id="pt-cprog-status">Cancelling...</span><span id="pt-cprog-count">0/0</span></div></div>',
+    '          <div class="pt-log" id="pt-cancel-log"><span class="pt-info">// Select trades then hit Cancel Selected.</span></div>',
+    '          <div style="display:flex;gap:8px"><button class="pt-btn pt-btn-red pt-btn-w" id="pt-do-cancel" disabled>Cancel Selected</button><button class="pt-btn pt-btn-dark" id="pt-cancel-stop" disabled style="min-width:76px">Stop</button></div>',
+    '        </div>',
+    '      </div>',
+    // LOOKUP
+    '      <div class="pt-pane" id="pt-pane-lookup">',
+    '        <div class="pt-box"><div class="pt-box-title">Item Lookup</div><div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-item-q" placeholder="Item name or asset ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-item-go">Search</button></div><div class="pt-lk-result" id="pt-lk-item-r"><img id="pt-lk-item-img" src="" onerror="this.src=\'https://koromons.xyz/logo.png\'"/><div><div class="pt-lk-name" id="pt-lk-item-name"></div><div class="pt-lk-stats" id="pt-lk-item-stats"></div></div></div></div>',
+    '        <div class="pt-box"><div class="pt-box-title">Player Lookup</div><div style="display:flex;gap:8px"><input class="pt-input" id="pt-lk-user-q" placeholder="User ID..." style="flex:1"/><button class="pt-btn pt-btn-blue" id="pt-lk-user-go">Search</button></div><div class="pt-lk-result" id="pt-lk-user-r"><img id="pt-lk-user-img" src="" style="border-radius:50%" onerror="this.src=\'https://koromons.xyz/logo.png\'"/><div><div class="pt-lk-name" id="pt-lk-user-name"></div><div class="pt-lk-stats" id="pt-lk-user-stats"></div></div></div></div>',
+    '      </div>',
+    // SETTINGS
+    '      <div class="pt-pane" id="pt-pane-settings">',
+    '        <div class="pt-box"><div class="pt-box-title">Theme</div><div class="pt-theme-grid" id="pt-theme-grid"></div></div>',
+    '        <div class="pt-box"><div class="pt-box-title">Button Icon</div><div class="pt-icon-grid" id="pt-icon-grid"></div></div>',
+    '        <div class="pt-box"><div class="pt-box-title">Blacklisted Users</div><div style="display:flex;gap:8px;margin-bottom:10px"><input class="pt-input" id="pt-bl-q" placeholder="User ID or username..." style="flex:1"/><button class="pt-btn pt-btn-red" id="pt-bl-add">Block</button></div><div id="pt-bl-list" style="min-height:22px"></div></div>',
+    '        <div class="pt-box"><div class="pt-box-title">Rate Limit Backoff</div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">Base wait time</span><div class="pt-stepper"><button class="pt-step-btn" id="pt-bo-m">\u2212</button><div class="pt-step-v" id="pt-bo-v">15s</div><button class="pt-step-btn" id="pt-bo-p">+</button></div></div><div style="font-size:11px;color:var(--text-dim);line-height:1.7">On each rate limit hit: waits <b style="color:var(--text-muted)">base \xD7 2^n</b> before retrying.<br/>15s \u2192 30s \u2192 60s \u2192 120s \u2192 ...</div></div>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('');
   document.body.appendChild(wrap);
 
-  // ─── THEME PICKER RENDER ──────────────────
-  const THEME_SWATCHES = {
+  // ─── THEME SWATCHES ──────────────────────
+  var THEME_SWATCHES = {
     dark:     'linear-gradient(135deg,#1c1e24 50%,#1a73e8 50%)',
     midnight: 'linear-gradient(135deg,#0d1117 50%,#388bfd 50%)',
     rose:     'linear-gradient(135deg,#1e1519 50%,#e8619a 50%)',
@@ -536,15 +299,16 @@
   };
 
   function renderThemePicker() {
-    const grid = document.getElementById('pt-theme-grid'); if (!grid) return;
+    var grid = document.getElementById('pt-theme-grid'); if (!grid) return;
     grid.innerHTML = '';
-    Object.entries(THEMES).forEach(([key, theme]) => {
-      const card = document.createElement('div');
+    Object.keys(THEMES).forEach(function(key) {
+      var theme = THEMES[key];
+      var card = document.createElement('div');
       card.className = 'pt-theme-card' + (currentTheme === key ? ' active-theme' : '');
-      card.innerHTML = `<div class="pt-theme-swatch" style="background:${THEME_SWATCHES[key]}"></div>${theme.name}`;
-      card.addEventListener('click', () => {
+      card.innerHTML = '<div class="pt-theme-swatch" style="background:' + THEME_SWATCHES[key] + '"></div>' + theme.name;
+      card.addEventListener('click', function() {
         applyTheme(key);
-        document.querySelectorAll('.pt-theme-card').forEach(c => c.classList.remove('active-theme'));
+        document.querySelectorAll('.pt-theme-card').forEach(function(c) { c.classList.remove('active-theme'); });
         card.classList.add('active-theme');
       });
       grid.appendChild(card);
@@ -552,16 +316,16 @@
   }
 
   function renderIconPicker() {
-    const grid = document.getElementById('pt-icon-grid'); if (!grid) return;
+    var grid = document.getElementById('pt-icon-grid'); if (!grid) return;
     grid.innerHTML = '';
-    Object.entries(FAB_ICONS).forEach(([key, svg]) => {
-      const btn = document.createElement('div');
+    Object.keys(FAB_ICONS).forEach(function(key) {
+      var btn = document.createElement('div');
       btn.className = 'pt-icon-btn' + (currentFabIcon === key ? ' active-icon' : '');
-      btn.innerHTML = svg;
+      btn.innerHTML = FAB_ICONS[key];
       btn.title = key;
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', function() {
         applyFabIcon(key);
-        document.querySelectorAll('.pt-icon-btn').forEach(b => b.classList.remove('active-icon'));
+        document.querySelectorAll('.pt-icon-btn').forEach(function(b) { b.classList.remove('active-icon'); });
         btn.classList.add('active-icon');
       });
       grid.appendChild(btn);
@@ -569,170 +333,249 @@
   }
 
   // ─── MODAL / TABS ─────────────────────────
-  const overlay = document.getElementById('pt-overlay');
-  const modal = document.getElementById('pt-modal');
+  var overlay = document.getElementById('pt-overlay');
+  var modal   = document.getElementById('pt-modal');
 
-  document.getElementById('pt-fab').onclick = e => {
-    if (fabDragged) return;
+  function openModal() {
     overlay.classList.add('open');
-    modal.style.left = '';
-    modal.style.top = '';
+    modal.style.left = modal.style.top = '';
     modal.style.position = 'absolute';
-  };
-  document.getElementById('pt-close').onclick = () => overlay.classList.remove('open');
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
-  document.querySelectorAll('.pt-tab').forEach(t => {
-    t.addEventListener('click', () => {
-      document.querySelectorAll('.pt-tab,.pt-pane').forEach(x => x.classList.remove('active'));
+    modal.style.transform = '';
+  }
+
+  document.getElementById('pt-fab').addEventListener('click', function(e) {
+    if (fabDragged) return;
+    openModal();
+  });
+  document.getElementById('pt-close').addEventListener('click', function() { overlay.classList.remove('open'); });
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.classList.remove('open'); });
+
+  document.querySelectorAll('.pt-tab').forEach(function(t) {
+    t.addEventListener('click', function() {
+      document.querySelectorAll('.pt-tab,.pt-pane').forEach(function(x) { x.classList.remove('active'); });
       t.classList.add('active');
-      document.getElementById(`pt-pane-${t.dataset.pane}`).classList.add('active');
+      document.getElementById('pt-pane-' + t.dataset.pane).classList.add('active');
     });
   });
 
   // ─── DRAGGABLE MODAL ──────────────────────
-  (function makeDraggableModal() {
-    const header = document.getElementById('pt-header');
-    let dragging = false, ox = 0, oy = 0;
-    header.addEventListener('mousedown', e => {
+  (function() {
+    var header = document.getElementById('pt-header');
+    var dragging = false, ox = 0, oy = 0;
+    header.addEventListener('mousedown', function(e) {
       if (e.target === document.getElementById('pt-close')) return;
       dragging = true;
-      const r = modal.getBoundingClientRect();
-      ox = e.clientX - r.left;
-      oy = e.clientY - r.top;
+      var r = modal.getBoundingClientRect();
+      ox = e.clientX - r.left; oy = e.clientY - r.top;
       modal.style.transition = 'none';
       e.preventDefault();
     });
-    document.addEventListener('mousemove', e => {
+    document.addEventListener('mousemove', function(e) {
       if (!dragging) return;
-      const x = Math.max(0, Math.min(window.innerWidth - modal.offsetWidth, e.clientX - ox));
-      const y = Math.max(0, Math.min(window.innerHeight - modal.offsetHeight, e.clientY - oy));
-      modal.style.left = x + 'px';
-      modal.style.top = y + 'px';
+      var x = Math.max(0, Math.min(window.innerWidth  - modal.offsetWidth,  e.clientX - ox));
+      var y = Math.max(0, Math.min(window.innerHeight - modal.offsetHeight, e.clientY - oy));
+      modal.style.left = x + 'px'; modal.style.top = y + 'px';
       modal.style.transform = 'none';
     });
-    document.addEventListener('mouseup', () => { dragging = false; modal.style.transition = ''; });
+    document.addEventListener('mouseup', function() { if (dragging) { dragging = false; modal.style.transition = ''; } });
   })();
 
   // ─── DRAGGABLE FAB ────────────────────────
-  let fabDragged = false;
-  (function makeDraggableFab() {
-    const fab = document.getElementById('pt-fab');
-    let dragging = false, ox = 0, oy = 0, startX = 0, startY = 0;
+  var fabDragged = false;
+  (function() {
+    var fab = document.getElementById('pt-fab');
+    var dragging = false, ox = 0, oy = 0, startX = 0, startY = 0;
 
-    // Load saved position
-    const savedPos = GM_getValue('fabPos', null);
-    if (savedPos) { try { const p = JSON.parse(savedPos); fab.style.left = p.l; fab.style.top = p.t; fab.style.right = 'auto'; fab.style.bottom = 'auto'; } catch {} }
+    // Restore saved position or default bottom-right
+    if (fabPos && fabPos.l != null && fabPos.t != null) {
+      fab.style.left = fabPos.l; fab.style.top = fabPos.t;
+      fab.style.right = 'auto'; fab.style.bottom = 'auto';
+    } else {
+      fab.style.bottom = '28px'; fab.style.right = '28px';
+    }
 
-    fab.addEventListener('mousedown', e => {
+    fab.addEventListener('mousedown', function(e) {
       dragging = true; fabDragged = false;
-      const r = fab.getBoundingClientRect();
-      ox = e.clientX - r.left;
-      oy = e.clientY - r.top;
+      var r = fab.getBoundingClientRect();
+      ox = e.clientX - r.left; oy = e.clientY - r.top;
       startX = e.clientX; startY = e.clientY;
       fab.style.transition = 'none';
       e.preventDefault();
     });
-    document.addEventListener('mousemove', e => {
+    document.addEventListener('mousemove', function(e) {
       if (!dragging) return;
       if (Math.abs(e.clientX - startX) > 4 || Math.abs(e.clientY - startY) > 4) fabDragged = true;
-      const x = Math.max(0, Math.min(window.innerWidth - fab.offsetWidth, e.clientX - ox));
-      const y = Math.max(0, Math.min(window.innerHeight - fab.offsetHeight, e.clientY - oy));
+      var x = Math.max(0, Math.min(window.innerWidth  - fab.offsetWidth,  e.clientX - ox));
+      var y = Math.max(0, Math.min(window.innerHeight - fab.offsetHeight, e.clientY - oy));
       fab.style.left = x + 'px'; fab.style.top = y + 'px';
       fab.style.right = 'auto'; fab.style.bottom = 'auto';
     });
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('mouseup', function() {
       if (!dragging) return;
-      dragging = false;
-      fab.style.transition = '';
-      if (fabDragged) GM_setValue('fabPos', JSON.stringify({ l: fab.style.left, t: fab.style.top }));
-      setTimeout(() => { fabDragged = false; }, 50);
+      dragging = false; fab.style.transition = '';
+      if (fabDragged) GM_setValue('fabPos2', JSON.stringify({ l: fab.style.left, t: fab.style.top }));
+      setTimeout(function() { fabDragged = false; }, 50);
     });
   })();
 
+  // ─── SIDEBAR INJECTION ───────────────────
+  function injectSidebar() {
+    var card = document.querySelector('.card-0-2-80');
+    if (!card) return false;
+
+    // Remove old entry if re-injecting
+    var old = document.getElementById('pt-sidebar-entry');
+    if (old) old.parentNode.removeChild(old);
+
+    var theme = THEMES[currentTheme] || THEMES.dark;
+    var entry = document.createElement('div');
+    entry.id = 'pt-sidebar-entry';
+    entry.style.background = theme.vars['--fab-bg'];
+    entry.style.color       = theme.vars['--fab-txt'];
+    entry.innerHTML = '<span class="pt-sbi-icn">' + FAB_ICONS[currentFabIcon] + '</span><span>Trading Tool</span>';
+    entry.addEventListener('click', openModal);
+
+    // Always inject at the very bottom of the card
+    card.appendChild(entry);
+    return true;
+  }
+
+  function trySidebarInject(attempts) {
+    attempts = attempts || 0;
+    if (injectSidebar()) return;
+    if (attempts < 30) setTimeout(function() { trySidebarInject(attempts + 1); }, 400);
+  }
+
+  // Keep sidebar entry color in sync when theme changes
+  var _applyThemeOrig = applyTheme;
+  applyTheme = function(key) {
+    _applyThemeOrig(key);
+    var entry = document.getElementById('pt-sidebar-entry');
+    if (entry) {
+      var t = THEMES[key] || THEMES.dark;
+      entry.style.background = t.vars['--fab-bg'];
+      entry.style.color       = t.vars['--fab-txt'];
+    }
+  };
+
+  // Keep sidebar icon in sync when icon changes
+  applyFabIcon = function(key) {
+    var svg = FAB_ICONS[key] || FAB_ICONS.arrow;
+    var fab = document.getElementById('pt-fab');
+    if (fab) {
+      var lbl = fab.querySelector('.pt-fab-lbl');
+      fab.innerHTML = '<span class="pt-fab-icn">' + svg + '</span><span class="pt-fab-lbl">' + (lbl ? lbl.textContent : 'Trading Tool') + '</span>';
+    }
+    var sideIcn = document.querySelector('#pt-sidebar-entry .pt-sbi-icn');
+    if (sideIcn) sideIcn.innerHTML = svg;
+    currentFabIcon = key;
+    GM_setValue('fabIcon', key);
+  };
+
+  // MutationObserver to catch sidebar re-renders (Edge SPA navigation)
+  var sidebarObserver = new MutationObserver(function() {
+    if (!document.getElementById('pt-sidebar-entry')) trySidebarInject();
+  });
+  sidebarObserver.observe(document.body, { childList: true, subtree: true });
+
   // ─── UTILS ───────────────────────────────
-  let cachedCsrf = '';
+  var cachedCsrf = '';
 
   function getCSRF() {
     try {
-      const c = document.cookie.split(';').find(x => x.trim().startsWith('rbxcsrf4='));
-      if (c) { const p = JSON.parse(atob(c.trim().slice('rbxcsrf4='.length).split('.')[1])); return atob(p.csrf); }
-    } catch {}
-    const m = document.querySelector('meta[name="csrf-token"]');
+      var c = document.cookie.split(';').filter(function(x) { return x.trim().indexOf('rbxcsrf4=') === 0; })[0];
+      if (c) { var p = JSON.parse(atob(c.trim().slice('rbxcsrf4='.length).split('.')[1])); return atob(p.csrf); }
+    } catch(e) {}
+    var m = document.querySelector('meta[name="csrf-token"]');
     return m ? m.content : '';
   }
 
   async function getMyUid() {
-    if (window.Roblox?.CurrentUser?.userId) return String(window.Roblox.CurrentUser.userId);
-    const el = document.querySelector('[data-user-id],[data-userid]');
+    if (window.Roblox && window.Roblox.CurrentUser && window.Roblox.CurrentUser.userId) return String(window.Roblox.CurrentUser.userId);
+    var el = document.querySelector('[data-user-id],[data-userid]');
     if (el) return el.dataset.userid || el.dataset.userId || el.getAttribute('data-user-id');
-    const mc = document.cookie.match(/(?:^|;\s*)UserId=(\d+)/i);
+    var mc = document.cookie.match(/(?:^|;\s*)UserId=(\d+)/i);
     if (mc) return String(mc[1]);
     try {
-      const r = await siteReq('GET', 'https://www.pekora.zip/apisite/users/v1/users/authenticated');
-      if (r.status === 200) { const d = JSON.parse(r.body); if (d?.id) return String(d.id); }
-    } catch {}
+      var r = await siteReq('GET', BASE + '/users/v1/users/authenticated');
+      if (r.status === 200) { var d = JSON.parse(r.body); if (d && d.id) return String(d.id); }
+    } catch(e) {}
     return null;
   }
 
-  const getThumb = id => `https://www.pekora.zip/Thumbs/Asset.ashx?width=420&height=420&assetId=${id}`;
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function getThumb(id) { return 'https://www.pekora.zip/Thumbs/Asset.ashx?width=420&height=420&assetId=' + id; }
+  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
-  function log(id, msg, cls = '') {
-    const el = document.getElementById(id); if (!el) return;
-    const d = document.createElement('div'); if (cls) d.className = cls;
-    d.textContent = `[${new Date().toLocaleTimeString('en-US',{hour12:false})}] ${msg}`;
+  function log(id, msg, cls) {
+    var el = document.getElementById(id); if (!el) return;
+    var d = document.createElement('div'); if (cls) d.className = cls;
+    d.textContent = '[' + new Date().toLocaleTimeString('en-US', {hour12: false}) + '] ' + msg;
     el.appendChild(d); el.scrollTop = el.scrollHeight;
   }
-  const blog = (m, c) => log('pt-log', m, c);
-  const clog = (m, c) => log('pt-cancel-log', m, c);
+  function blog(m, c) { log('pt-log', m, c); }
+  function clog(m, c) { log('pt-cancel-log', m, c); }
 
   function setProgress(fillId, countId, statusId, done, total, status) {
-    document.getElementById(fillId).style.width = total > 0 ? `${(done/total)*100}%` : '0%';
-    document.getElementById(countId).textContent = `${done}/${total}`;
+    document.getElementById(fillId).style.width = total > 0 ? ((done / total) * 100) + '%' : '0%';
+    document.getElementById(countId).textContent = done + '/' + total;
     if (status && statusId) document.getElementById(statusId).textContent = status;
   }
 
-  const demCls = d => !d ? 'dem-u' : ['high','amazing','great'].includes(d) ? 'dem-hi' : ['low','terrible','awful'].includes(d) ? 'dem-lo' : 'dem-n';
+  function demCls(d) {
+    if (!d) return 'dem-u';
+    if (d === 'high' || d === 'amazing' || d === 'great') return 'dem-hi';
+    if (d === 'low' || d === 'terrible' || d === 'awful') return 'dem-lo';
+    return 'dem-n';
+  }
 
   // ─── KOROMONS API ────────────────────────
   function koroReq(path) {
-    return new Promise(resolve => GM_xmlhttpRequest({
-      method: 'GET', url: KOROMONS + path,
-      onload: r => { try { resolve(JSON.parse(r.responseText)); } catch { resolve(null); } },
-      onerror: () => resolve(null)
-    }));
+    return new Promise(function(resolve) {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: KOROMONS + path,
+        headers: { 'Accept': 'application/json' },
+        onload: function(r) { try { resolve(JSON.parse(r.responseText)); } catch(e) { resolve(null); } },
+        onerror: function() { resolve(null); },
+        ontimeout: function() { resolve(null); }
+      });
+    });
   }
 
-  async function siteReq(method, url, data = null, isRetry = false) {
+  function siteReq(method, url, data, isRetry) {
     if (!cachedCsrf) cachedCsrf = getCSRF();
-    return new Promise(resolve => GM_xmlhttpRequest({
-      method, url, withCredentials: true,
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(cachedCsrf ? { 'X-CSRF-TOKEN': cachedCsrf } : {}) },
-      ...(data ? { data: JSON.stringify(data) } : {}),
-      onload: async r => {
-        if (r.status === 403 && !isRetry) {
-          const m = r.responseHeaders.match(/x-csrf-token:\s*([^\r\n]+)/i);
-          if (m) { cachedCsrf = m[1].trim(); return resolve(await siteReq(method, url, data, true)); }
-        }
-        resolve({ status: r.status, body: r.responseText });
-      },
-      onerror: () => resolve({ status: 0, body: '' })
-    }));
+    var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+    if (cachedCsrf) headers['X-CSRF-TOKEN'] = cachedCsrf;
+    return new Promise(function(resolve) {
+      GM_xmlhttpRequest({
+        method: method, url: url, withCredentials: true, headers: headers,
+        data: data ? JSON.stringify(data) : undefined,
+        onload: async function(r) {
+          if (r.status === 403 && !isRetry) {
+            var hdr = r.responseHeaders ? r.responseHeaders.match(/x-csrf-token:\s*([^\r\n]+)/i) : null;
+            if (hdr) { cachedCsrf = hdr[1].trim(); return resolve(await siteReq(method, url, data, true)); }
+          }
+          resolve({ status: r.status, body: r.responseText });
+        },
+        onerror: function() { resolve({ status: 0, body: '' }); },
+        ontimeout: function() { resolve({ status: 0, body: '' }); }
+      });
+    });
   }
 
   // ─── CATALOG ─────────────────────────────
-  let catSearch = '', catSort = 'val-d';
+  var catSearch = '', catSort = 'val-d';
 
   async function loadValues() {
-    const data = await koroReq('/items');
+    var data = await koroReq('/items');
     if (Array.isArray(data) && data.length) {
       allItems = {};
-      data.forEach(item => {
-        const id = String(item.itemId || item.ItemId || item.id || '');
+      data.forEach(function(item) {
+        var id = String(item.itemId || item.ItemId || item.id || '');
         if (!id) return;
-        allItems[id] = { name: item.Name||item.name||'', value: item.Value||item.value||0, rap: 0, demand: item.Demand||item.demand||'', rarity: item.Rarity||item.rarity||'', acronym: item.Acronym||item.acronym||'' };
+        allItems[id] = { name: item.Name || item.name || '', value: item.Value || item.value || 0, rap: 0, demand: item.Demand || item.demand || '', rarity: item.Rarity || item.rarity || '', acronym: item.Acronym || item.acronym || '' };
       });
-      blog(`Loaded ${Object.keys(allItems).length} items from Koromons`, 'pt-info');
+      blog('Loaded ' + Object.keys(allItems).length + ' items from Koromons', 'pt-info');
       renderCatalog();
     } else {
       blog('Could not reach Koromons API', 'pt-err');
@@ -741,28 +584,31 @@
   }
 
   function getCatalogItems() {
-    let items = Object.entries(allItems).map(([id, v]) => ({ id, ...v }));
-    if (catSearch) items = items.filter(i => i.name?.toLowerCase().includes(catSearch.toLowerCase()));
-    switch (catSort) {
-      case 'val-d': items.sort((a,b)=>(b.value||0)-(a.value||0)); break;
-      case 'val-a': items.sort((a,b)=>(a.value||0)-(b.value||0)); break;
-      case 'rap-d': items.sort((a,b)=>(b.rap||0)-(a.rap||0)); break;
-      case 'rap-a': items.sort((a,b)=>(a.rap||0)-(b.rap||0)); break;
-      case 'name':  items.sort((a,b)=>(a.name||'').localeCompare(b.name||'')); break;
-    }
+    var items = Object.keys(allItems).map(function(id) { return Object.assign({ id: id }, allItems[id]); });
+    var q = catSearch.toLowerCase();
+    if (q) items = items.filter(function(i) { return i.name && i.name.toLowerCase().indexOf(q) !== -1; });
+    // Safe sort — no localeCompare with locale arg to avoid Edge issues
+    if (catSort === 'val-d') items.sort(function(a,b) { return (b.value||0)-(a.value||0); });
+    else if (catSort === 'val-a') items.sort(function(a,b) { return (a.value||0)-(b.value||0); });
+    else if (catSort === 'rap-d') items.sort(function(a,b) { return (b.rap||0)-(a.rap||0); });
+    else if (catSort === 'rap-a') items.sort(function(a,b) { return (a.rap||0)-(b.rap||0); });
+    else if (catSort === 'name') items.sort(function(a,b) {
+      var na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0; // no localeCompare — avoids Edge locale errors
+    });
     return items.slice(0, 150);
   }
 
   function renderCatalog() {
-    const grid = document.getElementById('pt-cat-grid');
-    const items = getCatalogItems();
+    var grid = document.getElementById('pt-cat-grid');
+    var items = getCatalogItems();
     if (!items.length) { grid.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No items match</div>'; return; }
     grid.innerHTML = '';
-    items.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'pt-citem' + (targetItem?.id === item.id ? ' sel' : '');
-      div.innerHTML = `<img src="${getThumb(item.id)}" loading="lazy" onerror="this.src='https://koromons.xyz/logo.png'"/><div class="pt-citem-n" title="${item.name||''}">${item.name||'?'}</div><div class="pt-citem-v">${item.value?.toLocaleString()||'?'}</div><div class="pt-citem-r">RAP ${item.rap > 0 ? item.rap.toLocaleString() : '?'}</div>`;
-      div.addEventListener('click', () => pickTarget(item));
+    items.forEach(function(item) {
+      var div = document.createElement('div');
+      div.className = 'pt-citem' + (targetItem && targetItem.id === item.id ? ' sel' : '');
+      div.innerHTML = '<img src="' + getThumb(item.id) + '" loading="lazy" onerror="this.src=\'https://koromons.xyz/logo.png\'"/><div class="pt-citem-n" title="' + (item.name||'') + '">' + (item.name||'?') + '</div><div class="pt-citem-v">' + (item.value ? item.value.toLocaleString() : '?') + '</div><div class="pt-citem-r">RAP ' + (item.rap > 0 ? item.rap.toLocaleString() : '?') + '</div>';
+      div.addEventListener('click', function() { pickTarget(item); });
       grid.appendChild(div);
     });
   }
@@ -771,62 +617,62 @@
     targetItem = item; owners = [];
     document.getElementById('pt-owners-n').textContent = '0';
     document.getElementById('pt-send').disabled = true;
-    document.getElementById('pt-target-label').textContent = `(${item.name})`;
+    document.getElementById('pt-target-label').textContent = '(' + item.name + ')';
     document.getElementById('pt-tgt-img').src = getThumb(item.id);
-    document.getElementById('pt-tgt-name').textContent = item.name || `Item ${item.id}`;
-    document.getElementById('pt-tgt-stats').innerHTML = `Value: <span>${item.value?.toLocaleString()||'?'}</span> &nbsp;·&nbsp; RAP: <span id="pt-live-rap">${item.rap > 0 ? item.rap.toLocaleString() : '...'}</span> &nbsp;·&nbsp; Demand: <span class="dem ${demCls(item.demand)}">${item.demand||'untracked'}</span>`;
+    document.getElementById('pt-tgt-name').textContent = item.name || ('Item ' + item.id);
+    document.getElementById('pt-tgt-stats').innerHTML = 'Value: <span>' + (item.value ? item.value.toLocaleString() : '?') + '</span> &nbsp;\xB7&nbsp; RAP: <span id="pt-live-rap">' + (item.rap > 0 ? item.rap.toLocaleString() : '...') + '</span> &nbsp;\xB7&nbsp; Demand: <span class="dem ' + demCls(item.demand) + '">' + (item.demand || 'untracked') + '</span>';
     document.getElementById('pt-target-preview').classList.add('vis');
     renderCatalog();
-    blog(`Target: ${item.name} (ID ${item.id})`, 'pt-info');
-    const itemData = await koroReq('/items/' + item.id);
-    const rap = itemData?.RAP || itemData?.Rap || itemData?.rap || 0;
-    allItems[item.id] = { ...allItems[item.id], rap };
-    targetItem = { ...targetItem, rap };
-    const rapEl = document.getElementById('pt-live-rap');
+    blog('Target: ' + item.name + ' (ID ' + item.id + ')', 'pt-info');
+    var itemData = await koroReq('/items/' + item.id);
+    var rap = (itemData && (itemData.RAP || itemData.Rap || itemData.rap)) || 0;
+    allItems[item.id] = Object.assign({}, allItems[item.id], { rap: rap });
+    targetItem = Object.assign({}, targetItem, { rap: rap });
+    var rapEl = document.getElementById('pt-live-rap');
     if (rapEl) rapEl.textContent = rap > 0 ? rap.toLocaleString() : '?';
   }
 
-  document.getElementById('pt-cat-search').addEventListener('input', e => { catSearch = e.target.value; renderCatalog(); });
-  document.getElementById('pt-cat-sort').addEventListener('change', e => { catSort = e.target.value; renderCatalog(); });
+  document.getElementById('pt-cat-search').addEventListener('input', function(e) { catSearch = e.target.value; renderCatalog(); });
+  document.getElementById('pt-cat-sort').addEventListener('change', function(e) { catSort = e.target.value; renderCatalog(); });
 
   // ─── INVENTORY ───────────────────────────
-  document.getElementById('pt-load-inv').addEventListener('click', async () => {
-    const uid = await getMyUid();
-    if (!uid) { blog('Cannot detect your user ID — are you logged in?', 'pt-err'); return; }
+  document.getElementById('pt-load-inv').addEventListener('click', async function() {
+    var uid = await getMyUid();
+    if (!uid) { blog('Cannot detect your user ID \u2014 are you logged in?', 'pt-err'); return; }
     document.getElementById('pt-inv-grid').innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:6px 0">Loading...</div>';
     blog('Fetching inventory...', 'pt-info');
-    myInventory = []; let cursor = '';
+    myInventory = []; var cursor = '';
     while (true) {
-      const res = await siteReq('GET', `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?limit=100${cursor ? `&cursor=${cursor}` : ''}`);
-      let data = null; try { data = JSON.parse(res.body); } catch {}
-      const batch = data?.data || (Array.isArray(data) ? data : []);
+      var res = await siteReq('GET', BASE + '/inventory/v1/users/' + uid + '/assets/collectibles?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+      var data = null; try { data = JSON.parse(res.body); } catch(e) {}
+      var batch = (data && data.data) || (Array.isArray(data) ? data : []);
       if (!batch.length) break;
       myInventory = myInventory.concat(batch);
-      cursor = data?.nextPageCursor; if (!cursor) break;
+      cursor = data && data.nextPageCursor; if (!cursor) break;
       await sleep(200);
     }
     if (!myInventory.length) { blog('No inventory items found', 'pt-err'); document.getElementById('pt-inv-grid').innerHTML = '<div style="color:#f87171;font-size:12px">No items found</div>'; return; }
-    blog(`Loaded ${myInventory.length} items`, 'pt-ok'); renderInventory();
+    blog('Loaded ' + myInventory.length + ' items', 'pt-ok'); renderInventory();
   });
 
   function renderInventory() {
-    const grid = document.getElementById('pt-inv-grid'); grid.innerHTML = '';
-    myInventory.forEach(item => {
-      const assetId = String(item.assetId || item.AssetId || '');
-      const uasId = item.userAssetId || item.UserAssetId || item.id;
-      const name = item.name || item.Name || item.assetName || `#${assetId}`;
-      const kor = allItems[assetId];
-      const div = document.createElement('div');
-      div.className = 'pt-iitem' + (selectedOfferItems.includes(uasId) ? ' sel' : '');
-      div.innerHTML = `<img src="${getThumb(assetId)}" loading="lazy" onerror="this.src='https://koromons.xyz/logo.png'"/><div class="pt-iitem-n" title="${name}">${name}</div><div class="pt-iitem-v">${kor ? kor.value?.toLocaleString() : ''}</div>`;
-      div.addEventListener('click', () => toggleOffer(uasId, assetId, div));
+    var grid = document.getElementById('pt-inv-grid'); grid.innerHTML = '';
+    myInventory.forEach(function(item) {
+      var assetId = String(item.assetId || item.AssetId || '');
+      var uasId = item.userAssetId || item.UserAssetId || item.id;
+      var name = item.name || item.Name || item.assetName || ('#' + assetId);
+      var kor = allItems[assetId];
+      var div = document.createElement('div');
+      div.className = 'pt-iitem' + (selectedOfferItems.indexOf(uasId) !== -1 ? ' sel' : '');
+      div.innerHTML = '<img src="' + getThumb(assetId) + '" loading="lazy" onerror="this.src=\'https://koromons.xyz/logo.png\'"/><div class="pt-iitem-n" title="' + name + '">' + name + '</div><div class="pt-iitem-v">' + (kor ? (kor.value ? kor.value.toLocaleString() : '') : '') + '</div>';
+      div.addEventListener('click', function() { toggleOffer(uasId, assetId, div); });
       grid.appendChild(div);
     });
     updateOfferStats();
   }
 
   function toggleOffer(uasId, assetId, el) {
-    const idx = selectedOfferItems.indexOf(uasId);
+    var idx = selectedOfferItems.indexOf(uasId);
     if (idx === -1) {
       if (selectedOfferItems.length >= 4) { blog('Max 4 offer items', 'pt-err'); return; }
       selectedOfferItems.push(uasId); el.classList.add('sel');
@@ -835,193 +681,189 @@
   }
 
   function updateOfferStats() {
-    document.getElementById('pt-offer-count').textContent = `(${selectedOfferItems.length}/4)`;
-    let rap = 0, val = 0;
-    selectedOfferItems.forEach(uasId => {
-      const item = myInventory.find(i => (i.userAssetId||i.UserAssetId||i.id) === uasId);
-      if (item) { const kor = allItems[String(item.assetId||item.AssetId||'')]; if (kor) { rap += kor.rap||0; val += kor.value||0; } }
+    document.getElementById('pt-offer-count').textContent = '(' + selectedOfferItems.length + '/4)';
+    var rap = 0, val = 0;
+    selectedOfferItems.forEach(function(uasId) {
+      var item = myInventory.filter(function(i) { return (i.userAssetId||i.UserAssetId||i.id) === uasId; })[0];
+      if (item) { var kor = allItems[String(item.assetId||item.AssetId||'')]; if (kor) { rap += kor.rap||0; val += kor.value||0; } }
     });
-    document.getElementById('pt-sel-rap').textContent = `${rap.toLocaleString()} RAP`;
-    document.getElementById('pt-sel-val').textContent = `${val.toLocaleString()} Value`;
+    document.getElementById('pt-sel-rap').textContent = rap.toLocaleString() + ' RAP';
+    document.getElementById('pt-sel-val').textContent = val.toLocaleString() + ' Value';
   }
 
-  const checkSendReady = () => { document.getElementById('pt-send').disabled = !(selectedOfferItems.length > 0 && owners.length > 0 && !isRunning); };
+  function checkSendReady() { document.getElementById('pt-send').disabled = !(selectedOfferItems.length > 0 && owners.length > 0 && !isRunning); }
 
   // ─── FIND OWNERS ─────────────────────────
-  document.getElementById('pt-find-owners').addEventListener('click', async () => {
+  document.getElementById('pt-find-owners').addEventListener('click', async function() {
     if (!targetItem) return;
-    blog(`Fetching owners of "${targetItem.name}"...`, 'pt-info');
-    owners = []; let cursor = '', page = 1, useV2 = true;
+    blog('Fetching owners of "' + targetItem.name + '"...', 'pt-info');
+    owners = []; var cursor = '', page = 1, useV2 = true;
     while (true) {
-      const url = useV2
-        ? `https://www.pekora.zip/apisite/inventory/v2/assets/${targetItem.id}/owners?limit=100&sortOrder=Asc${cursor ? `&cursor=${cursor}` : ''}`
-        : `https://www.pekora.zip/apisite/inventory/v1/assets/${targetItem.id}/owners?pageNumber=${page}&limit=100`;
-      const res = await siteReq('GET', url);
+      var url = useV2
+        ? BASE + '/inventory/v2/assets/' + targetItem.id + '/owners?limit=100&sortOrder=Asc' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')
+        : BASE + '/inventory/v1/assets/' + targetItem.id + '/owners?pageNumber=' + page + '&limit=100';
+      var res = await siteReq('GET', url);
       if (useV2 && res.status === 404 && !cursor) { useV2 = false; continue; }
-      let data = null; try { data = JSON.parse(res.body); } catch {}
-      const batch = data?.data || data?.owners || (Array.isArray(data) ? data : []);
+      var data = null; try { data = JSON.parse(res.body); } catch(e) {}
+      var batch = (data && data.data) || (data && data.owners) || (Array.isArray(data) ? data : []);
       if (!batch.length) break;
       owners = owners.concat(batch);
-      if (useV2) { cursor = data?.nextPageCursor; if (!cursor) break; }
+      if (useV2) { cursor = data && data.nextPageCursor; if (!cursor) break; }
       else { if (batch.length < 100) break; page++; }
       await sleep(350);
     }
     document.getElementById('pt-owners-n').textContent = owners.length;
-    blog(owners.length > 0 ? `Found ${owners.length} owners` : 'Found 0 owners', owners.length > 0 ? 'pt-ok' : 'pt-err');
+    blog(owners.length > 0 ? 'Found ' + owners.length + ' owners' : 'Found 0 owners', owners.length > 0 ? 'pt-ok' : 'pt-err');
     checkSendReady();
   });
 
   // ─── CANCEL TRADES ───────────────────────
-  document.getElementById('pt-load-trades').addEventListener('click', async () => {
+  document.getElementById('pt-load-trades').addEventListener('click', async function() {
     clog('Loading all outbound trades...', 'pt-info');
     document.getElementById('pt-trades-list').innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:4px 0">Loading...</div>';
     document.getElementById('pt-cancel-count').textContent = '(loading...)';
     outboundTrades = []; selectedTradeIds.clear();
-    let cursor = null, pages = 0;
+    var cursor = null, pages = 0;
     while (true) {
-      const res = await siteReq('GET', OUTBOUND_URL(cursor));
-      let data = null; try { data = JSON.parse(res.body); } catch {}
-      const batch = data?.data || [];
+      var res = await siteReq('GET', OUTBOUND_URL(cursor));
+      var data = null; try { data = JSON.parse(res.body); } catch(e) {}
+      var batch = (data && data.data) || [];
       if (!batch.length) break;
       outboundTrades = outboundTrades.concat(batch);
-      cursor = data?.nextPageCursor; pages++;
-      if (outboundTrades.length > 10) clog(`Page ${pages} — ${outboundTrades.length} trades loaded...`, 'pt-info');
+      cursor = data && data.nextPageCursor; pages++;
+      if (outboundTrades.length > 10) clog('Page ' + pages + ' \u2014 ' + outboundTrades.length + ' trades loaded...', 'pt-info');
       if (!cursor) break;
       await sleep(300);
     }
-    document.getElementById('pt-cancel-count').textContent = `(${outboundTrades.length} trades)`;
-    clog(`Loaded ${outboundTrades.length} outbound trades`, outboundTrades.length > 0 ? 'pt-ok' : 'pt-err');
+    document.getElementById('pt-cancel-count').textContent = '(' + outboundTrades.length + ' trades)';
+    clog('Loaded ' + outboundTrades.length + ' outbound trades', outboundTrades.length > 0 ? 'pt-ok' : 'pt-err');
     renderTradesList(); syncCancelBtn();
   });
 
   function renderTradesList() {
-    const list = document.getElementById('pt-trades-list');
+    var list = document.getElementById('pt-trades-list');
     if (!outboundTrades.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px 0">No outbound trades found.</div>'; return; }
     list.innerHTML = '';
-    outboundTrades.forEach(trade => {
-      const partner = trade.user?.name || trade.user?.displayName || `User ${trade.user?.id||'?'}`;
-      const expires = trade.expiration ? new Date(trade.expiration).toLocaleDateString() : '';
-      const sel = selectedTradeIds.has(trade.id);
-      const row = document.createElement('div');
+    outboundTrades.forEach(function(trade) {
+      var partner = (trade.user && (trade.user.name || trade.user.displayName)) || ('User ' + (trade.user && trade.user.id || '?'));
+      var expires = trade.expiration ? new Date(trade.expiration).toLocaleDateString() : '';
+      var sel = selectedTradeIds.has(trade.id);
+      var row = document.createElement('div');
       row.className = 'pt-trade-row' + (sel ? ' sel' : '');
       row.dataset.id = trade.id;
-      row.innerHTML = `
-        <input type="checkbox" class="pt-trade-check" data-id="${trade.id}" ${sel ? 'checked' : ''}/>
-        <span class="pt-trade-partner">${partner}</span>
-        <span class="pt-trade-meta">exp. ${expires}</span>
-        <span class="pt-trade-id">#${trade.id}</span>`;
-      const cb = row.querySelector('.pt-trade-check');
-      const toggle = checked => {
+      row.innerHTML = '<input type="checkbox" class="pt-trade-check" data-id="' + trade.id + '" ' + (sel ? 'checked' : '') + '/><span class="pt-trade-partner">' + partner + '</span><span class="pt-trade-meta">exp. ' + expires + '</span><span class="pt-trade-id">#' + trade.id + '</span>';
+      var cb = row.querySelector('.pt-trade-check');
+      var toggle = function(checked) {
         if (checked) { selectedTradeIds.add(trade.id); row.classList.add('sel'); }
         else { selectedTradeIds.delete(trade.id); row.classList.remove('sel'); }
         document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
         syncCancelBtn(); syncSelectAll();
       };
-      cb.addEventListener('change', () => toggle(cb.checked));
-      row.addEventListener('click', e => { if (e.target === cb) return; cb.checked = !cb.checked; toggle(cb.checked); });
+      cb.addEventListener('change', function() { toggle(cb.checked); });
+      row.addEventListener('click', function(e) { if (e.target === cb) return; cb.checked = !cb.checked; toggle(cb.checked); });
       list.appendChild(row);
     });
     document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
   }
 
   function syncSelectAll() {
-    const sa = document.getElementById('pt-select-all');
+    var sa = document.getElementById('pt-select-all');
     sa.checked = outboundTrades.length > 0 && selectedTradeIds.size === outboundTrades.length;
     sa.indeterminate = selectedTradeIds.size > 0 && selectedTradeIds.size < outboundTrades.length;
   }
-
   function syncCancelBtn() { document.getElementById('pt-do-cancel').disabled = selectedTradeIds.size === 0 || isCancelling; }
 
-  document.getElementById('pt-select-all').addEventListener('change', e => {
-    outboundTrades.forEach(t => { if (e.target.checked) selectedTradeIds.add(t.id); else selectedTradeIds.delete(t.id); });
-    document.querySelectorAll('.pt-trade-check').forEach(cb => { cb.checked = e.target.checked; cb.closest('.pt-trade-row').classList.toggle('sel', e.target.checked); });
+  document.getElementById('pt-select-all').addEventListener('change', function(e) {
+    outboundTrades.forEach(function(t) { if (e.target.checked) selectedTradeIds.add(t.id); else selectedTradeIds.delete(t.id); });
+    document.querySelectorAll('.pt-trade-check').forEach(function(cb) { cb.checked = e.target.checked; cb.closest('.pt-trade-row').classList.toggle('sel', e.target.checked); });
     document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
     syncCancelBtn();
   });
 
-  document.getElementById('pt-cdelay-m').addEventListener('click', () => { cancelDelay = Math.max(1, cancelDelay-1); document.getElementById('pt-cdelay-v').textContent = `${cancelDelay}s`; });
-  document.getElementById('pt-cdelay-p').addEventListener('click', () => { cancelDelay++; document.getElementById('pt-cdelay-v').textContent = `${cancelDelay}s`; });
+  document.getElementById('pt-cdelay-m').addEventListener('click', function() { cancelDelay = Math.max(1, cancelDelay-1); document.getElementById('pt-cdelay-v').textContent = cancelDelay + 's'; });
+  document.getElementById('pt-cdelay-p').addEventListener('click', function() { cancelDelay++; document.getElementById('pt-cdelay-v').textContent = cancelDelay + 's'; });
 
-  document.getElementById('pt-do-cancel').addEventListener('click', async () => {
+  document.getElementById('pt-do-cancel').addEventListener('click', async function() {
     if (isCancelling || !selectedTradeIds.size) return;
     isCancelling = true; shouldStopCancel = false;
     document.getElementById('pt-do-cancel').disabled = true;
     document.getElementById('pt-cancel-stop').disabled = false;
     document.getElementById('pt-cprog-wrap').style.display = 'block';
-    const toCancel = [...selectedTradeIds];
-    let done = 0, failed = 0;
-    clog(`Cancelling ${toCancel.length} trades...`, 'pt-info');
-    for (let i = 0; i < toCancel.length; i++) {
+    var toCancel = Array.from(selectedTradeIds);
+    var done = 0, failed = 0;
+    clog('Cancelling ' + toCancel.length + ' trades...', 'pt-info');
+    for (var i = 0; i < toCancel.length; i++) {
       if (shouldStopCancel) { clog('Stopped.', 'pt-err'); break; }
-      const id = toCancel[i];
-      const trade = outboundTrades.find(t => t.id === id);
-      const partner = trade?.user?.name || `#${id}`;
-      const res = await siteReq('POST', CANCEL_URL(id));
-      if (res.status === 429) { clog('Rate limited — waiting 30s...', 'pt-err'); setProgress('pt-cprog-fill','pt-cprog-count','pt-cprog-status',done+failed,toCancel.length,'Rate limited — 30s cooldown'); await sleep(30000); i--; continue; }
-      if (res.status === 200) { done++; clog(`✓ Cancelled trade with ${partner}`, 'pt-ok'); selectedTradeIds.delete(id); outboundTrades = outboundTrades.filter(t => t.id !== id); const row = document.querySelector(`.pt-trade-row[data-id="${id}"]`); if (row) row.classList.add('gone'); }
-      else { failed++; clog(`✗ Failed #${id} (HTTP ${res.status})`, 'pt-err'); }
+      var id = toCancel[i];
+      var trade = outboundTrades.filter(function(t) { return t.id === id; })[0];
+      var partner = (trade && trade.user && trade.user.name) || ('#' + id);
+      var res = await siteReq('POST', CANCEL_URL(id));
+      if (res.status === 429) { clog('Rate limited \u2014 waiting 30s...', 'pt-err'); setProgress('pt-cprog-fill','pt-cprog-count','pt-cprog-status',done+failed,toCancel.length,'Rate limited \u2014 30s'); await sleep(30000); i--; continue; }
+      if (res.status === 200) { done++; clog('\u2713 Cancelled trade with ' + partner, 'pt-ok'); selectedTradeIds.delete(id); outboundTrades = outboundTrades.filter(function(t) { return t.id !== id; }); var row = document.querySelector('.pt-trade-row[data-id="' + id + '"]'); if (row) row.classList.add('gone'); }
+      else { failed++; clog('\u2717 Failed #' + id + ' (HTTP ' + res.status + ')', 'pt-err'); }
       setProgress('pt-cprog-fill','pt-cprog-count','pt-cprog-status',done+failed,toCancel.length,'Cancelling...');
       if (i < toCancel.length-1 && !shouldStopCancel) await sleep(cancelDelay * 1000);
     }
-    clog(`Done — Cancelled: ${done}  Failed: ${failed}`, 'pt-ok');
-    document.getElementById('pt-cancel-count').textContent = `(${outboundTrades.length} remaining)`;
+    clog('Done \u2014 Cancelled: ' + done + '  Failed: ' + failed, 'pt-ok');
+    document.getElementById('pt-cancel-count').textContent = '(' + outboundTrades.length + ' remaining)';
     document.getElementById('pt-sel-trade-n').textContent = selectedTradeIds.size;
     isCancelling = false;
     document.getElementById('pt-cancel-stop').disabled = true;
     syncCancelBtn(); syncSelectAll();
     setProgress('pt-cprog-fill','pt-cprog-count','pt-cprog-status',done+failed,toCancel.length,'Complete');
-    if (done > 0) GM_notification({ title: 'Korone Trading Tool', text: `Cancelled ${done} trades.`, timeout: 4000 });
+    if (done > 0) GM_notification({ title: 'Korone Trading Tool', text: 'Cancelled ' + done + ' trades.', timeout: 4000 });
   });
 
-  document.getElementById('pt-cancel-stop').addEventListener('click', () => { shouldStopCancel = true; clog('Stopping...', 'pt-err'); });
+  document.getElementById('pt-cancel-stop').addEventListener('click', function() { shouldStopCancel = true; clog('Stopping...', 'pt-err'); });
 
   // ─── BLAST ───────────────────────────────
   function stepper(mId, pId, vId, get, set, fmt) {
-    document.getElementById(mId).addEventListener('click', () => { set(get()-1); document.getElementById(vId).textContent = fmt(get()); });
-    document.getElementById(pId).addEventListener('click', () => { set(get()+1); document.getElementById(vId).textContent = fmt(get()); });
+    document.getElementById(mId).addEventListener('click', function() { set(get()-1); document.getElementById(vId).textContent = fmt(get()); });
+    document.getElementById(pId).addEventListener('click', function() { set(get()+1); document.getElementById(vId).textContent = fmt(get()); });
   }
-  stepper('pt-maxu-m','pt-maxu-p','pt-maxu-v', ()=>maxUsers, v=>{maxUsers=Math.max(0,v);}, v=>v===0?'All':v);
-  stepper('pt-delay-m','pt-delay-p','pt-delay-v', ()=>delaySeconds, v=>{delaySeconds=Math.max(1,v);}, v=>`${v}s`);
-  stepper('pt-bo-m','pt-bo-p','pt-bo-v', ()=>backoffBase, v=>{backoffBase=Math.max(5,v);}, v=>`${v}s`);
-  document.getElementById('pt-maxcopy').addEventListener('click', () => { maxUsers = owners.length; document.getElementById('pt-maxu-v').textContent = maxUsers; });
+  stepper('pt-maxu-m','pt-maxu-p','pt-maxu-v', function(){return maxUsers;}, function(v){maxUsers=Math.max(0,v);}, function(v){return v===0?'All':v;});
+  stepper('pt-delay-m','pt-delay-p','pt-delay-v', function(){return delaySeconds;}, function(v){delaySeconds=Math.max(1,v);}, function(v){return v+'s';});
+  stepper('pt-bo-m','pt-bo-p','pt-bo-v', function(){return backoffBase;}, function(v){backoffBase=Math.max(5,v);}, function(v){return v+'s';});
+  document.getElementById('pt-maxcopy').addEventListener('click', function() { maxUsers = owners.length; document.getElementById('pt-maxu-v').textContent = maxUsers; });
   document.getElementById('pt-send').addEventListener('click', blast);
-  document.getElementById('pt-stop').addEventListener('click', () => { shouldStop = true; blog('Stopping...', 'pt-err'); });
+  document.getElementById('pt-stop').addEventListener('click', function() { shouldStop = true; blog('Stopping...', 'pt-err'); });
 
   async function blast() {
     if (isRunning) return;
-    const myUid = await getMyUid();
+    var myUid = await getMyUid();
     if (!myUid) { blog('Cannot detect your user ID', 'pt-err'); return; }
-    const blacklist = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
-    const limit = maxUsers === 0 ? owners.length : Math.min(maxUsers, owners.length);
-    const queue = owners.slice(0, limit).filter(o => {
-      const uid = String(o.userId||o.owner?.userId||o.owner?.id||o.id||'');
-      const uname = (o.username||o.owner?.username||o.name||'').toLowerCase();
-      return uid !== myUid && !blacklist.includes(uid) && !blacklist.map(x=>x.toLowerCase()).includes(uname);
+    var blacklist = GM_getValue('blacklistUsers','').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    var limit = maxUsers === 0 ? owners.length : Math.min(maxUsers, owners.length);
+    var blLower = blacklist.map(function(x) { return x.toLowerCase(); });
+    var queue = owners.slice(0, limit).filter(function(o) {
+      var uid = String((o.userId) || (o.owner && (o.owner.userId || o.owner.id)) || o.id || '');
+      var uname = ((o.username) || (o.owner && o.owner.username) || o.name || '').toLowerCase();
+      return uid !== myUid && blacklist.indexOf(uid) === -1 && blLower.indexOf(uname) === -1;
     });
     if (!queue.length) { blog('No valid targets', 'pt-err'); return; }
     isRunning = true; shouldStop = false; consecutiveRateLimits = 0;
     document.getElementById('pt-send').disabled = true;
     document.getElementById('pt-stop').disabled = false;
     document.getElementById('pt-prog-wrap').style.display = 'block';
-    blog(`Blasting ${queue.length} targets at ${delaySeconds}s delay`, 'pt-info');
-    let sent = 0, failed = 0, skipped = 0;
-    for (let i = 0; i < queue.length; i++) {
+    blog('Blasting ' + queue.length + ' targets at ' + delaySeconds + 's delay', 'pt-info');
+    var sent = 0, failed = 0, skipped = 0;
+    for (var i = 0; i < queue.length; i++) {
       if (shouldStop) { blog('Stopped.', 'pt-err'); break; }
-      const o = queue[i];
-      const theirUid = String(o.userId||o.owner?.userId||o.owner?.id||o.id);
-      const theirName = o.username||o.owner?.username||o.name||theirUid;
-      const theirAssets = await getTheirAssets(theirUid, targetItem.id);
+      var o = queue[i];
+      var theirUid = String((o.userId) || (o.owner && (o.owner.userId || o.owner.id)) || o.id);
+      var theirName = (o.username) || (o.owner && o.owner.username) || o.name || theirUid;
+      var theirAssets = await getTheirAssets(theirUid, targetItem.id);
       if (!theirAssets.length) { skipped++; setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Sending...'); continue; }
-      const result = await doSendTrade(myUid, theirUid, selectedOfferItems, theirAssets.slice(0,1));
-      if (result.rateLimited) { consecutiveRateLimits++; const wait = backoffBase * Math.pow(2, consecutiveRateLimits-1); blog(`Rate limited — waiting ${wait}s`, 'pt-err'); setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,`Rate limited — ${wait}s`); await sleep(wait*1000); i--; continue; }
+      var result = await doSendTrade(myUid, theirUid, selectedOfferItems, theirAssets.slice(0,1));
+      if (result.rateLimited) { consecutiveRateLimits++; var wait = backoffBase * Math.pow(2, consecutiveRateLimits-1); blog('Rate limited \u2014 waiting ' + wait + 's', 'pt-err'); setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Rate limited \u2014 ' + wait + 's'); await sleep(wait*1000); i--; continue; }
       consecutiveRateLimits = 0;
-      if (result.ok) { sent++; blog(`✓ ${theirName}`, 'pt-ok'); }
-      else { failed++; blog(`✗ ${theirName} (HTTP ${result.status})`, 'pt-err'); }
+      if (result.ok) { sent++; blog('\u2713 ' + theirName, 'pt-ok'); }
+      else { failed++; blog('\u2717 ' + theirName + ' (HTTP ' + result.status + ')', 'pt-err'); }
       setProgress('pt-prog-fill','pt-prog-count','pt-prog-status',sent+failed+skipped,queue.length,'Sending...');
       if (i < queue.length-1 && !shouldStop) await sleep(delaySeconds*1000);
     }
-    blog(`Complete — Sent: ${sent}  Failed: ${failed}  Skipped: ${skipped}`, 'pt-ok');
-    if (sent > 0) GM_notification({ title: 'Korone Trading Tool', text: `Blast done! ${sent} trades sent.`, timeout: 5000 });
+    blog('Complete \u2014 Sent: ' + sent + '  Failed: ' + failed + '  Skipped: ' + skipped, 'pt-ok');
+    if (sent > 0) GM_notification({ title: 'Korone Trading Tool', text: 'Blast done! ' + sent + ' trades sent.', timeout: 5000 });
     isRunning = false;
     document.getElementById('pt-stop').disabled = true;
     checkSendReady();
@@ -1029,78 +871,81 @@
   }
 
   async function getTheirAssets(uid, targetAssetId) {
-    const res = await siteReq('GET', `https://www.pekora.zip/apisite/inventory/v1/users/${uid}/assets/collectibles?assetId=${targetAssetId}`);
+    var res = await siteReq('GET', BASE + '/inventory/v1/users/' + uid + '/assets/collectibles?assetId=' + targetAssetId);
     try {
-      const data = JSON.parse(res.body);
-      const items = data?.data || (Array.isArray(data) ? data : []);
-      return items.filter(i => String(i.assetId||i.AssetId) === String(targetAssetId)).map(i => i.userAssetId||i.UserAssetId||i.id).filter(Boolean);
-    } catch { return []; }
+      var data = JSON.parse(res.body);
+      var items = (data && data.data) || (Array.isArray(data) ? data : []);
+      return items.filter(function(i) { return String(i.assetId||i.AssetId) === String(targetAssetId); }).map(function(i) { return i.userAssetId||i.UserAssetId||i.id; }).filter(Boolean);
+    } catch(e) { return []; }
   }
 
   async function doSendTrade(myUid, theirUid, myUAIds, theirUAIds) {
-    const res = await siteReq('POST', TRADE_URL, { offers: [{ userId: myUid, userAssetIds: myUAIds, robux: null }, { userId: String(theirUid), userAssetIds: theirUAIds, robux: null }] });
+    var res = await siteReq('POST', TRADE_URL, { offers: [{ userId: myUid, userAssetIds: myUAIds, robux: null }, { userId: String(theirUid), userAssetIds: theirUAIds, robux: null }] });
     return { ok: res.status === 200, rateLimited: res.status === 429, status: res.status };
   }
 
   // ─── LOOKUP ──────────────────────────────
   async function itemLookup() {
-    const q = document.getElementById('pt-lk-item-q').value.trim(); if (!q) return;
-    let item = null;
+    var q = document.getElementById('pt-lk-item-q').value.trim(); if (!q) return;
+    var item = null;
     if (/^\d+$/.test(q)) {
-      const d = await koroReq('/items/' + q);
+      var d = await koroReq('/items/' + q);
       if (d && (d.Name || d.name)) item = { found: true, assetId: q, name: d.Name||d.name, value: d.Value||d.value||0, rap: d.RAP||d.Rap||d.rap||0, demand: d.Demand||d.demand||'', rarity: d.Rarity||d.rarity||'' };
     }
     if (!item) {
-      const m = Object.entries(allItems).find(([,v]) => v.name?.toLowerCase().includes(q.toLowerCase()));
-      if (m) item = { found: true, assetId: m[0], ...m[1] };
+      var ql = q.toLowerCase();
+      var found = Object.keys(allItems).filter(function(id) { return allItems[id].name && allItems[id].name.toLowerCase().indexOf(ql) !== -1; })[0];
+      if (found) item = Object.assign({ found: true, assetId: found }, allItems[found]);
     }
-    const r = document.getElementById('pt-lk-item-r');
-    if (item?.found) {
+    var r = document.getElementById('pt-lk-item-r');
+    if (item && item.found) {
       document.getElementById('pt-lk-item-img').src = getThumb(item.assetId);
-      document.getElementById('pt-lk-item-name').textContent = item.name || `Item ${item.assetId}`;
-      document.getElementById('pt-lk-item-stats').innerHTML = `<b>Value:</b> ${item.value?.toLocaleString()||'?'}<br/><b>RAP:</b> ${item.rap?.toLocaleString()||'?'}<br/><b>Demand:</b> <span class="dem ${demCls(item.demand)}">${item.demand||'untracked'}</span><br/><b>Rarity:</b> ${item.rarity||'?'}`;
+      document.getElementById('pt-lk-item-name').textContent = item.name || ('Item ' + item.assetId);
+      document.getElementById('pt-lk-item-stats').innerHTML = '<b>Value:</b> ' + (item.value ? item.value.toLocaleString() : '?') + '<br/><b>RAP:</b> ' + (item.rap ? item.rap.toLocaleString() : '?') + '<br/><b>Demand:</b> <span class="dem ' + demCls(item.demand) + '">' + (item.demand||'untracked') + '</span><br/><b>Rarity:</b> ' + (item.rarity||'?');
       r.classList.add('vis');
     } else r.classList.remove('vis');
   }
 
   async function playerLookup() {
-    const q = document.getElementById('pt-lk-user-q').value.trim(); if (!q) return;
-    const p = await koroReq('/users/' + q);
-    const r = document.getElementById('pt-lk-user-r');
+    var q = document.getElementById('pt-lk-user-q').value.trim(); if (!q) return;
+    var p = await koroReq('/users/' + q);
+    var r = document.getElementById('pt-lk-user-r');
     if (p && (p.id || p.name)) {
-      let avatarUrl = '';
-      const av = await koroReq('/pekora/avatar-headshot?userIds=' + (p.id||q) + '&size=150x150&format=png');
-      if (av?.data?.[0]?.imageUrl) avatarUrl = av.data[0].imageUrl;
+      var avatarUrl = '';
+      var av = await koroReq('/pekora/avatar-headshot?userIds=' + (p.id||q) + '&size=150x150&format=png');
+      if (av && av.data && av.data[0] && av.data[0].imageUrl) avatarUrl = av.data[0].imageUrl;
       document.getElementById('pt-lk-user-img').src = avatarUrl || 'https://koromons.xyz/logo.png';
-      document.getElementById('pt-lk-user-name').textContent = p.displayName ? `${p.displayName} (@${p.name})` : (p.name || `User ${q}`);
-      document.getElementById('pt-lk-user-stats').innerHTML = `<b>Value:</b> ${p.Value?.toLocaleString()||'?'}<br/><b>Joined:</b> ${p.created ? new Date(p.created).toLocaleDateString() : '?'}<br/><b>Banned:</b> ${p.isBanned ? 'Yes' : 'No'}`;
+      document.getElementById('pt-lk-user-name').textContent = p.displayName ? (p.displayName + ' (@' + p.name + ')') : (p.name || ('User ' + q));
+      document.getElementById('pt-lk-user-stats').innerHTML = '<b>Value:</b> ' + (p.Value ? p.Value.toLocaleString() : '?') + '<br/><b>Joined:</b> ' + (p.created ? new Date(p.created).toLocaleDateString() : '?') + '<br/><b>Banned:</b> ' + (p.isBanned ? 'Yes' : 'No');
       r.classList.add('vis');
     } else {
       document.getElementById('pt-lk-user-img').src = 'https://koromons.xyz/logo.png';
       document.getElementById('pt-lk-user-name').textContent = 'User not found';
-      document.getElementById('pt-lk-user-stats').innerHTML = `No data for user <b>${q}</b>.`;
+      document.getElementById('pt-lk-user-stats').innerHTML = 'No data for user <b>' + q + '</b>.';
       r.classList.add('vis');
     }
   }
 
   document.getElementById('pt-lk-item-go').addEventListener('click', itemLookup);
   document.getElementById('pt-lk-user-go').addEventListener('click', playerLookup);
-  document.getElementById('pt-lk-item-q').addEventListener('keydown', e => { if (e.key==='Enter') itemLookup(); });
-  document.getElementById('pt-lk-user-q').addEventListener('keydown', e => { if (e.key==='Enter') playerLookup(); });
+  document.getElementById('pt-lk-item-q').addEventListener('keydown', function(e) { if (e.key==='Enter') itemLookup(); });
+  document.getElementById('pt-lk-user-q').addEventListener('keydown', function(e) { if (e.key==='Enter') playerLookup(); });
 
   // ─── BLACKLIST ───────────────────────────
   function renderBlacklist() {
-    const el = document.getElementById('pt-bl-list');
-    const list = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
+    var el = document.getElementById('pt-bl-list');
+    var list = GM_getValue('blacklistUsers','').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
     if (!list.length) { el.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">Nobody blocked</span>'; return; }
-    el.innerHTML = list.map((u,i)=>`<span class="pt-chip">🚫 ${u} <span class="pt-chip-rm" data-i="${i}">×</span></span>`).join('');
-    el.querySelectorAll('.pt-chip-rm').forEach(btn => { btn.addEventListener('click', () => { list.splice(Number(btn.dataset.i),1); GM_setValue('blacklistUsers',list.join(',')); renderBlacklist(); }); });
+    el.innerHTML = list.map(function(u, i) { return '<span class="pt-chip">\uD83D\uDEAB ' + u + ' <span class="pt-chip-rm" data-i="' + i + '">\xD7</span></span>'; }).join('');
+    el.querySelectorAll('.pt-chip-rm').forEach(function(btn) {
+      btn.addEventListener('click', function() { list.splice(Number(btn.dataset.i),1); GM_setValue('blacklistUsers',list.join(',')); renderBlacklist(); });
+    });
   }
 
-  document.getElementById('pt-bl-add').addEventListener('click', () => {
-    const v = document.getElementById('pt-bl-q').value.trim(); if (!v) return;
-    const list = (GM_getValue('blacklistUsers','')).split(',').map(s=>s.trim()).filter(Boolean);
-    if (!list.includes(v)) { list.push(v); GM_setValue('blacklistUsers',list.join(',')); }
+  document.getElementById('pt-bl-add').addEventListener('click', function() {
+    var v = document.getElementById('pt-bl-q').value.trim(); if (!v) return;
+    var list = GM_getValue('blacklistUsers','').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (list.indexOf(v) === -1) { list.push(v); GM_setValue('blacklistUsers', list.join(',')); }
     document.getElementById('pt-bl-q').value = ''; renderBlacklist();
   });
 
