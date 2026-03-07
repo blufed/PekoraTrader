@@ -21,12 +21,8 @@
 (function () {
   'use strict';
 
-  // ═══════════════════════════════════════════════════════════════════
-  //  KEY SYSTEM — DO NOT REMOVE OR MODIFY THIS BLOCK
-  //  Removing or altering this section disables all API functionality.
-  // ═══════════════════════════════════════════════════════════════════
 
-  const _ADMIN_H = '\x6d\x36\x32\x37\x37\x34'; // do not modify
+  const _ADMIN_H = '\x6d\x36\x32\x37\x37\x34'; 
 
   const _x0 = '\x6b\x30\x72\x4f';
   const _x1 = '\x6e\x33\x5f\x54';
@@ -84,11 +80,7 @@
 
   function _poisonCheck(){return _session!==null&&_session!==undefined;}
 
-  // ═══════════════════════════════════════════════════════════════════
-  //  END OF KEY SYSTEM BLOCK
-  // ═══════════════════════════════════════════════════════════════════
 
-  // ─── STATE ───────────────────────────────────────────────────────
   let isRunning=false, shouldStop=false;
   let allItems={}, myInventory=[], selectedOfferItems=[];
   let targetItem=null, owners=[], consecutiveRateLimits=0;
@@ -102,7 +94,7 @@
   let blastResults=[];
   let currentUserInfo={uid:null,name:null,avatar:null};
 
-  // ─── ENDPOINTS ───────────────────────────────────────────────────
+
   const BASE='https://www.pekora.zip/apisite';
   const TRADE_URL=BASE+'/trades/v1/trades/send';
   const KOROMONS='https://koromons.xyz/api';
@@ -110,7 +102,6 @@
   function CANCEL_URL(id){return BASE+'/trades/v1/trades/'+id+'/decline';}
   function HISTORY_URL(type,cur){return BASE+'/trades/v1/trades/'+type+'?limit=25'+(cur?'&cursor='+encodeURIComponent(cur):'');}
 
-  // ─── THEMES ──────────────────────────────────────────────────────
   const THEMES={
     dark:    {name:'Dark',       vars:{'--bg-modal':'#1c1e24','--bg-header':'#15171c','--bg-box':'#22242b','--bg-input':'#18191f','--bg-log':'#121318','--border':'#2b2d36','--border2':'#25272e','--text-pri':'#eaecf0','--text-sec':'#c9cdd4','--text-muted':'#555c6b','--text-dim':'#3e4351','--accent':'#1a73e8','--accent-hov':'#1260cc','--tab-active':'#1a73e8','--notice-bg':'rgba(234,179,8,.1)','--notice-bd':'rgba(234,179,8,.35)','--notice-txt':'#fde047','--scrollbar':'#2e3039','--fab-bg':'#1a73e8','--fab-hov':'#1260cc','--fab-txt':'#fff'}},
     midnight:{name:'Midnight',   vars:{'--bg-modal':'#0d1117','--bg-header':'#090d13','--bg-box':'#161b22','--bg-input':'#0d1117','--bg-log':'#070a0f','--border':'#21262d','--border2':'#161b22','--text-pri':'#e6edf3','--text-sec':'#b1bac4','--text-muted':'#484f58','--text-dim':'#30363d','--accent':'#388bfd','--accent-hov':'#1f6feb','--tab-active':'#388bfd','--notice-bg':'rgba(56,139,253,.1)','--notice-bd':'rgba(56,139,253,.35)','--notice-txt':'#79c0ff','--scrollbar':'#21262d','--fab-bg':'#388bfd','--fab-hov':'#1f6feb','--fab-txt':'#fff'}},
@@ -155,7 +146,7 @@
     currentFabIcon=key; GM_setValue('fabIcon',key);
   }
 
-  // ─── CSS ─────────────────────────────────────────────────────────
+
   const style=document.createElement('style');
   style.textContent=`
 #pt-keygate{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999999;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
@@ -365,7 +356,7 @@
   `;
   document.head.appendChild(style);
 
-  // ─── KEY GATE HTML ────────────────────────────────────────────────
+
   const keyGateEl=document.createElement('div');
   keyGateEl.id='pt-keygate';
   keyGateEl.className='hidden';
@@ -381,7 +372,7 @@
 </div>`;
   document.body.appendChild(keyGateEl);
 
-  // ─── MAIN HTML ────────────────────────────────────────────────────
+
   const wrap=document.createElement('div');
   wrap.innerHTML=`
 <button id="pt-fab"><span class="pt-fab-icn">${FAB_ICONS[currentFabIcon]}</span><span class="pt-fab-lbl">Trading Tool</span></button>
@@ -408,17 +399,17 @@
   </div>
   <div id="pt-body">
 
-   <!-- ═══ BLAST PANE ═══ -->
+
    <div class="pt-pane active" id="pt-pane-blast">
     <div class="pt-2col">
      <div>
-      <!-- OFFER ITEMS -->
+
       <div class="pt-box">
        <div class="pt-box-title">1. Your offer items <em id="pt-offer-count">(0/4)</em></div>
        <button class="pt-btn pt-btn-blue pt-btn-w" id="pt-load-inv">Load My Inventory</button>
        <div id="pt-inv-grid"><div style="color:var(--text-dim);font-size:11px;padding:5px 0">Click above to load inventory</div></div>
       </div>
-      <!-- TRADE TEMPLATES -->
+
       <div class="pt-box">
        <div class="pt-box-title">Templates <em style="font-size:9px;font-weight:400;color:var(--text-dim)">(save/load offer loadouts)</em></div>
        <div class="pt-tmpl-grid" id="pt-tmpl-grid"></div>
@@ -429,7 +420,7 @@
       </div>
      </div>
      <div>
-      <!-- TARGET ITEM -->
+
       <div class="pt-box">
        <div class="pt-box-title">2. Target item <em id="pt-target-label"></em></div>
        <div class="pt-cat-row">
@@ -443,7 +434,7 @@
         <button class="pt-btn pt-btn-dark pt-btn-sm" id="pt-find-owners">Find Owners</button>
        </div>
       </div>
-      <!-- FILTERS -->
+
       <div class="pt-box">
        <div class="pt-box-title">Owner Filters</div>
        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
@@ -459,7 +450,7 @@
      </div>
     </div>
 
-    <!-- BLAST CONTROLS -->
+
     <div class="pt-box">
      <div class="pt-box-title">3. Blast trades</div>
      <div id="pt-ratio-bar" class="pt-ratio-bar" style="display:none">
@@ -485,7 +476,7 @@
     </div>
    </div>
 
-   <!-- ═══ CANCEL PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-cancel">
     <div class="pt-box">
      <div class="pt-box-title">Outbound Trades <em id="pt-cancel-count">(none loaded)</em></div>
@@ -507,7 +498,7 @@
     </div>
    </div>
 
-   <!-- ═══ TRADE HISTORY PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-history">
     <div class="pt-box">
      <div class="pt-box-title">Trade History</div>
@@ -522,7 +513,7 @@
     </div>
    </div>
 
-   <!-- ═══ PORTFOLIO PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-portfolio">
     <div class="pt-box">
      <div class="pt-box-title">My Portfolio</div>
@@ -535,7 +526,7 @@
     </div>
    </div>
 
-   <!-- ═══ PRICE ALERTS PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-alerts">
     <div class="pt-box">
      <div class="pt-box-title">Watch an Item</div>
@@ -553,13 +544,13 @@
     </div>
    </div>
 
-   <!-- ═══ LOOKUP PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-lookup">
     <div class="pt-box"><div class="pt-box-title">Item Lookup</div><div style="display:flex;gap:7px"><input class="pt-input" id="pt-lk-item-q" placeholder="Item name or asset ID..." style="flex:1"/><button class="pt-btn pt-btn-blue pt-btn-sm" id="pt-lk-item-go">Search</button></div><div class="pt-lk-result" id="pt-lk-item-r"><img id="pt-lk-item-img" src="" onerror="this.src='https://koromons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-item-name"></div><div class="pt-lk-stats" id="pt-lk-item-stats"></div></div></div></div>
     <div class="pt-box"><div class="pt-box-title">Player Lookup</div><div style="display:flex;gap:7px"><input class="pt-input" id="pt-lk-user-q" placeholder="User ID..." style="flex:1"/><button class="pt-btn pt-btn-blue pt-btn-sm" id="pt-lk-user-go">Search</button></div><div class="pt-lk-result" id="pt-lk-user-r"><img id="pt-lk-user-img" src="" style="border-radius:50%" onerror="this.src='https://koromons.xyz/logo.png'"/><div><div class="pt-lk-name" id="pt-lk-user-name"></div><div class="pt-lk-stats" id="pt-lk-user-stats"></div></div></div></div>
    </div>
 
-   <!-- ═══ SETTINGS PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-settings">
     <div class="pt-box"><div class="pt-box-title">Theme</div><div class="pt-theme-grid" id="pt-theme-grid"></div></div>
     <div class="pt-box"><div class="pt-box-title">Button Icon</div><div class="pt-icon-grid" id="pt-icon-grid"></div></div>
@@ -571,7 +562,7 @@
     </div>
    </div>
 
-   <!-- ═══ ADMIN PANE ═══ -->
+
    <div class="pt-pane" id="pt-pane-admin">
     <div class="pt-notice pt-notice-admin">&#9733; Admin Panel — Only visible to you.</div>
     <div class="pt-box">
@@ -603,7 +594,7 @@
 </div>`;
   document.body.appendChild(wrap);
 
-  // ─── MODAL / TABS ─────────────────────────────────────────────────
+
   const overlay=document.getElementById('pt-overlay');
   const modal=document.getElementById('pt-modal');
 
@@ -621,7 +612,7 @@
     });
   });
 
-  // ─── MINIMIZE TO HUD ──────────────────────────────────────────────
+
   const hudEl=document.getElementById('pt-hud');
   hudEl.style.bottom='28px'; hudEl.style.right='28px';
 
@@ -640,7 +631,6 @@
   document.getElementById('pt-minimize-btn').addEventListener('click',minimizeToHud);
   document.getElementById('pt-minimize-hud-btn').addEventListener('click',minimizeToHud);
 
-  // ─── DRAGGABLE MODAL ──────────────────────────────────────────────
   (function(){
     const header=document.getElementById('pt-header');
     let dragging=false,ox=0,oy=0;
@@ -659,7 +649,7 @@
     document.addEventListener('mouseup',function(){if(dragging){dragging=false;modal.style.transition='';}});
   })();
 
-  // ─── DRAGGABLE FAB ────────────────────────────────────────────────
+
   let fabDragged=false;
   (function(){
     const fab=document.getElementById('pt-fab');
@@ -685,7 +675,7 @@
     });
   })();
 
-  // ─── SIDEBAR ──────────────────────────────────────────────────────
+
   function injectSidebar(){
     const card=document.querySelector('.card-0-2-80');if(!card)return false;
     const old=document.getElementById('pt-sidebar-entry');if(old)old.remove();
@@ -699,7 +689,7 @@
   function trySidebarInject(n){n=n||0;if(injectSidebar())return;if(n<30)setTimeout(()=>trySidebarInject(n+1),400);}
   new MutationObserver(function(){if(!document.getElementById('pt-sidebar-entry'))trySidebarInject();}).observe(document.body,{childList:true,subtree:true});
 
-  // ─── UTILS ────────────────────────────────────────────────────────
+
   let cachedCsrf='';
 
   function getCSRF(){
@@ -752,7 +742,7 @@
     return 'dem-n';
   }
 
-  // ─── COMPLETION SOUND ─────────────────────────────────────────────
+
   function playDone(){
     if(!document.getElementById('pt-opt-sound').checked)return;
     try{
@@ -768,7 +758,7 @@
     }catch(e){}
   }
 
-  // ─── KOROMONS API ────────────────────────────────────────────────
+
   function koroReq(path){
     return new Promise(function(resolve){
       GM_xmlhttpRequest({method:'GET',url:KOROMONS+path,headers:{'Accept':'application/json'},
@@ -794,19 +784,19 @@
     });
   }
 
-  // ─── USER PROFILE (header chip) ───────────────────────────────────
+
   async function loadUserChip(){
     const uid=await getMyUid();if(!uid)return;
     currentUserInfo.uid=uid;
     try{
-      // Get username from authenticated user endpoint
+
       let name='User '+uid;
       try{
         const ur=await _rawGet(BASE+'/users/v1/users/authenticated');
         if(ur.status===200){const ud=JSON.parse(ur.body);name=ud.displayName||ud.name||name;}
       }catch(e){}
 
-      // Fallback: try users endpoint directly
+
       if(name==='User '+uid){
         try{
           const ur2=await _rawGet(BASE+'/users/v1/users/'+uid);
@@ -816,7 +806,7 @@
 
       currentUserInfo.name=name;
 
-      // Get avatar headshot from pekora thumbnails API
+
       let avatarUrl='';
       try{
         const av=await _rawGet(BASE+'/thumbnails/v1/users/avatar-headshot?userIds='+uid+'&size=150x150&format=png');
@@ -826,7 +816,7 @@
         }
       }catch(e){}
 
-      // Fallback to the asset thumb style if thumbnails API failed
+
       if(!avatarUrl) avatarUrl='https://www.pekora.zip/Thumbs/Avatar.ashx?width=100&height=100&userId='+uid;
 
       currentUserInfo.avatar=avatarUrl;
@@ -840,7 +830,7 @@
     }catch(e){}
   }
 
-  // ─── CATALOG ─────────────────────────────────────────────────────
+
   let catSearch='',catSort='val-d';
 
   async function loadValues(){
@@ -906,7 +896,7 @@
   document.getElementById('pt-cat-search').addEventListener('input',e=>{catSearch=e.target.value;renderCatalog();});
   document.getElementById('pt-cat-sort').addEventListener('change',e=>{catSort=e.target.value;renderCatalog();});
 
-  // ─── OFFER VALUE CALCULATOR ───────────────────────────────────────
+
   function updateRatioBar(){
     let offerVal=0,offerRap=0;
     selectedOfferItems.forEach(function(uasId){
@@ -927,7 +917,7 @@
     }else{document.getElementById('pt-ratio-result').textContent='—';}
   }
 
-  // ─── INVENTORY ───────────────────────────────────────────────────
+
   document.getElementById('pt-load-inv').addEventListener('click',async function(){
     if(!_guard()){blog('No active license.','pt-err');return;}
     const uid=await getMyUid();if(!uid){blog('Cannot detect your user ID','pt-err');return;}
@@ -979,7 +969,7 @@
 
   function checkSendReady(){document.getElementById('pt-send').disabled=!(selectedOfferItems.length>0&&owners.length>0&&!isRunning);}
 
-  // ─── TRADE TEMPLATES ──────────────────────────────────────────────
+
   function loadTemplates(){return JSON.parse(GM_getValue('_tmpls','[]'));}
   function saveTemplates(t){GM_setValue('_tmpls',JSON.stringify(t.slice(0,5)));}
 
@@ -1018,7 +1008,7 @@
     blog('Template "'+name+'" saved','pt-ok');
   });
 
-  // ─── FIND OWNERS ─────────────────────────────────────────────────
+
   document.getElementById('pt-find-owners').addEventListener('click',async function(){
     if(!_guard()){blog('No active license.','pt-err');return;}
     if(!targetItem)return;
@@ -1043,7 +1033,6 @@
     checkSendReady();updateRatioBar();
   });
 
-  // ─── CANCEL TRADES ───────────────────────────────────────────────
   document.getElementById('pt-load-trades').addEventListener('click',async function(){
     if(!_guard()){clog('No active license.','pt-err');return;}
     clog('Loading all outbound trades...','pt-info');
@@ -1064,12 +1053,12 @@
     renderTradesList();syncCancelBtn();
   });
 
-  // Cancel filter by name
+
   document.getElementById('pt-cancel-filter').addEventListener('input',function(e){
     cancelFilterText=e.target.value.toLowerCase();renderTradesList();
   });
 
-  // Cancel by age
+
   let cancelAgeDays=7;
   document.getElementById('pt-age-m').addEventListener('click',function(){cancelAgeDays=Math.max(1,cancelAgeDays-1);document.getElementById('pt-age-v').textContent=cancelAgeDays+'d';});
   document.getElementById('pt-age-p').addEventListener('click',function(){cancelAgeDays++;document.getElementById('pt-age-v').textContent=cancelAgeDays+'d';});
@@ -1163,14 +1152,14 @@
 
   document.getElementById('pt-cancel-stop').addEventListener('click',function(){shouldStopCancel=true;clog('Stopping...','pt-err');});
 
-  // ─── TRADE HISTORY ───────────────────────────────────────────────
+
   let historyTrades=[];
 
   async function loadHistory(type){
     hlog('Loading '+type+' trades...','pt-info');
     document.getElementById('pt-hist-list').innerHTML='<div style="color:var(--text-dim);font-size:11px">Loading...</div>';
     historyTrades=[];let cursor=null;
-    // Step 1: fetch the trade list (gives us IDs + partner names)
+
     const tradeList=[];
     while(true){
       const res=await siteReq('GET',HISTORY_URL(type,cursor));
@@ -1180,12 +1169,12 @@
       cursor=data&&data.nextPageCursor;if(!cursor)break;await sleep(300);
     }
     hlog('Fetched '+tradeList.length+' trade IDs — loading details...','pt-info');
-    // Step 2: fetch full detail for each trade to get actual items traded
+
     for(let i=0;i<tradeList.length;i++){
       const t=tradeList[i];
       const det=await siteReq('GET',BASE+'/trades/v1/trades/'+t.id);
       let full=null;try{full=JSON.parse(det.body);}catch(e){}
-      // merge: use full detail if available, else fall back to list entry
+
       historyTrades.push(full&&full.offers?full:t);
       if((i+1)%5===0)hlog('Loaded '+(i+1)+'/'+tradeList.length+' details...','pt-info');
       await sleep(200);
@@ -1202,7 +1191,7 @@
     historyTrades.forEach(function(trade){
       const partner=(trade.user&&(trade.user.name||trade.user.displayName))||('User '+(trade.user&&trade.user.id||'?'));
       const partnerUid=String((trade.user&&trade.user.id)||'');
-      // pekora.zip API returns offers[x].userAssets (array of objects with .assetId), NOT userAssetIds
+
       const offers=trade.offers||[];
       let myOffer=null,theirOffer=null;
       offers.forEach(function(o){
@@ -1211,7 +1200,7 @@
       });
       if(!myOffer)myOffer=offers[0]||null;
       if(!theirOffer)theirOffer=offers[1]||null;
-      // handle both field names: userAssets (objects) or userAssetIds (ids)
+
       const myAssets=(myOffer&&(myOffer.userAssets||myOffer.userAssetIds))||[];
       const theirAssets=(theirOffer&&(theirOffer.userAssets||theirOffer.userAssetIds))||[];
       const date=trade.created?new Date(trade.created).toLocaleDateString():
@@ -1227,7 +1216,7 @@
         '</div>'+
         '<span class="pt-hist-badge '+badgeCls+'">'+badgeTxt+'</span>';
       list.appendChild(row);
-      // Load avatar async via GM so it bypasses CORS
+
       if(partnerUid){
         GM_xmlhttpRequest({
           method:'GET',
@@ -1262,7 +1251,7 @@
     copyCSV(rows,'Trade history exported to clipboard','pt-hist-log');
   });
 
-  // ─── PORTFOLIO ───────────────────────────────────────────────────
+
   document.getElementById('pt-port-load').addEventListener('click',async function(){
     if(!_guard())return;
     const uid=await getMyUid();if(!uid){return;}
@@ -1295,7 +1284,7 @@
     });
   });
 
-  // ─── PRICE ALERTS ────────────────────────────────────────────────
+
   let alertPct=5;
   document.getElementById('pt-alert-pct-m').addEventListener('click',function(){alertPct=Math.max(1,alertPct-1);document.getElementById('pt-alert-pct-v').textContent=alertPct+'%';});
   document.getElementById('pt-alert-pct-p').addEventListener('click',function(){alertPct=Math.min(99,alertPct+1);document.getElementById('pt-alert-pct-v').textContent=alertPct+'%';});
@@ -1304,7 +1293,7 @@
   function saveAlerts(){GM_setValue('_alerts',JSON.stringify(priceAlerts));}
 
   function alertLog(msg,cls){
-    // show feedback inside the alerts pane itself
+
     const el=document.getElementById('pt-alert-feedback');
     if(!el)return;
     el.textContent=msg;
@@ -1320,7 +1309,7 @@
     const ql=q.toLowerCase();
     let foundId=null,foundName='',foundVal=0;
 
-    // 1) check local cache first
+
     if(/^\d+$/.test(q)&&allItems[q]){
       foundId=q;foundName=allItems[q].name;foundVal=allItems[q].value||0;
     } else {
@@ -1328,16 +1317,16 @@
       if(id){foundId=id;foundName=allItems[id].name;foundVal=allItems[id].value||0;}
     }
 
-    // 2) if not in cache, query Koromons directly
+
     if(!foundId){
       if(/^\d+$/.test(q)){
-        // numeric ID — fetch by ID
+
         const d=await koroReq('/items/'+q);
         if(d&&(d.Name||d.name)){
           foundId=q;foundName=d.Name||d.name;foundVal=d.Value||d.value||0;
         }
       } else {
-        // name search — query Koromons search endpoint
+
         const d=await koroReq('/items/search?q='+encodeURIComponent(q));
         const results=Array.isArray(d)?d:(d&&d.data)||[];
         if(results.length){
@@ -1387,15 +1376,15 @@
         if(change>=a.pct){
           const dir=newVal>a.baseVal?'▲ UP':'▼ DOWN';
           GM_notification({title:'Price Alert: '+a.name,text:dir+' '+change.toFixed(1)+'% ('+a.baseVal.toLocaleString()+' → '+newVal.toLocaleString()+')',timeout:8000});
-          priceAlerts[i].baseVal=newVal; // update base so it doesn't keep alerting
+          priceAlerts[i].baseVal=newVal;
           saveAlerts();renderAlerts();
         }
         await sleep(2000);
       }
-    },15*60*1000); // every 15 minutes
+    },15*60*1000);
   }
 
-  // ─── BLAST ───────────────────────────────────────────────────────
+
   function stepper(mId,pId,vId,get,set,fmt){
     document.getElementById(mId).addEventListener('click',function(){set(get()-1);document.getElementById(vId).textContent=fmt(get());});
     document.getElementById(pId).addEventListener('click',function(){set(get()+1);document.getElementById(vId).textContent=fmt(get());});
@@ -1407,7 +1396,7 @@
   document.getElementById('pt-send').addEventListener('click',blast);
   document.getElementById('pt-stop').addEventListener('click',function(){shouldStop=true;blog('Stopping...','pt-err');});
 
-  // Export CSV helper
+
   function copyCSV(rows,successMsg,logId){
     const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
     navigator.clipboard.writeText(csv).catch(function(){const ta=document.createElement('textarea');ta.value=csv;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);});
@@ -1434,7 +1423,7 @@
     const minVal=parseInt(document.getElementById('pt-filter-minval').value)||0;
     const maxVal=parseInt(document.getElementById('pt-filter-maxval').value)||0;
 
-    // Build owner queue
+
     let seenUids=new Set();
     let pendingSet=new Set();
     if(skipPending){outboundTrades.forEach(t=>{if(t.user&&t.user.id)pendingSet.add(String(t.user.id));});}
@@ -1450,7 +1439,7 @@
       return true;
     });
 
-    // Value filter (requires koromons lookup per owner — only if set)
+
     if(minVal>0||maxVal>0){
       blog('Filtering owners by value (this may take a moment)...','pt-info');
       const filtered=[];
@@ -1485,7 +1474,7 @@
       const theirAss=multiItem?theirAssets.slice(0,4):theirAssets.slice(0,1);
       let result=await doSendTrade(myUid,theirUid,selectedOfferItems,theirAss);
 
-      // Auto-retry once on failure (not rate limit)
+
       if(!result.ok&&!result.rateLimited&&autoRetry){
         await sleep(3000);
         result=await doSendTrade(myUid,theirUid,selectedOfferItems,theirAss);
@@ -1527,7 +1516,7 @@
     return{ok:res.status===200,rateLimited:res.status===429,status:res.status};
   }
 
-  // ─── LOOKUP ──────────────────────────────────────────────────────
+
   async function itemLookup(){
     const q=document.getElementById('pt-lk-item-q').value.trim();if(!q)return;
     let item=null;
@@ -1547,7 +1536,7 @@
     const p=await koroReq('/users/'+q);
     const r=document.getElementById('pt-lk-user-r');
     if(p&&(p.id||p.name)){
-      // Fetch avatar via GM to bypass CORS — real thumbnails endpoint
+
       let avatarUrl='';
       const uid=String(p.id||q);
       await new Promise(function(resolve){
@@ -1580,7 +1569,7 @@
   document.getElementById('pt-lk-item-q').addEventListener('keydown',e=>{if(e.key==='Enter')itemLookup();});
   document.getElementById('pt-lk-user-q').addEventListener('keydown',e=>{if(e.key==='Enter')playerLookup();});
 
-  // ─── BLACKLIST ───────────────────────────────────────────────────
+
   function renderBlacklist(){
     const el=document.getElementById('pt-bl-list');
     const list=GM_getValue('blacklistUsers','').split(',').map(s=>s.trim()).filter(Boolean);
@@ -1598,7 +1587,7 @@
     document.getElementById('pt-bl-q').value='';renderBlacklist();
   });
 
-  // ─── THEME / ICON PICKERS ─────────────────────────────────────────
+
   function renderThemePicker(){
     const grid=document.getElementById('pt-theme-grid');if(!grid)return;grid.innerHTML='';
     Object.keys(THEMES).forEach(function(key){
@@ -1621,7 +1610,7 @@
     });
   }
 
-  // ─── KEY GATE UI ─────────────────────────────────────────────────
+
   function showKeyGate(){document.getElementById('pt-keygate').classList.remove('hidden');}
   function hideKeyGate(){document.getElementById('pt-keygate').classList.add('hidden');}
 
@@ -1650,7 +1639,7 @@
     _session=null;GM_setValue('_ks','');showKeyGate();blog('Key deactivated.','pt-info');
   });
 
-  // ─── ADMIN TAB ───────────────────────────────────────────────────
+
   let _admDays=30;
   stepper('pt-adm-days-m','pt-adm-days-p','pt-adm-days-v',()=>_admDays,v=>{_admDays=Math.max(1,Math.min(3650,v));},v=>v+'d');
 
@@ -1708,19 +1697,19 @@
     });
   }
 
-  // ─── KEY GATE + ADMIN INIT ────────────────────────────────────────
+
   async function initKeySystem(){
     const liveUid=await getMyUid();
     if(liveUid)_cachedUid=liveUid;
 
-    // Admin check first — bypasses key gate entirely
+
     if(liveUid&&_fnv(liveUid+_ss())===_ADMIN_H){
       _isAdminSession=true;hideKeyGate();_session='__admin__';
       const tab=document.getElementById('pt-tab-admin');if(tab)tab.style.display='';
       showKeyDisplay();renderKeyHistory();loadUserChip();return;
     }
 
-    // Try restoring saved key (backward compatible — reads same '_ks' key as v2.3)
+
     const stored=GM_getValue('_ks','');
     if(stored){
       const sig_ok=validateKey(stored);
@@ -1731,7 +1720,7 @@
     _session=null;GM_setValue('_ks','');showKeyGate();
   }
 
-  // ─── INIT ─────────────────────────────────────────────────────────
+
   renderBlacklist();renderThemePicker();renderIconPicker();
   applyTheme(currentTheme);applyFabIcon(currentFabIcon);
   renderTemplates();
@@ -1743,3 +1732,4 @@
   initKeySystem();
 
 })();
+
