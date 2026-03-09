@@ -8,6 +8,8 @@
 // @author       LMoD
 // @match        https://www.pekora.zip/*
 // @match        https://pekora.zip/*
+// @exclude      https://www.pekora.zip/internal/collectibles?userId=
+// @exclude      www.pekora.zip/Trade/TradeWindow.aspx?TradePartnerID=
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -1798,3 +1800,4 @@
   initKeySystem();
 
 })();
+
